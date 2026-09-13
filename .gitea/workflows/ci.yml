@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: none
+
+      - name: PHP syntax check
+        run: |
+          ERRORS=0
+          while IFS= read -r f; do
+            echo -n "Linting $f … "
+            if php -l "$f" 2>&1 | grep -q "No syntax errors"; then
+              echo "OK"
+            else
+              echo "FAIL"
+              ERRORS=$((ERRORS+1))
+            fi
+          done < <(find publisharticle -name '*.php')
+          echo ""
+          echo "Total errors: $ERRORS"
+          if [ "$ERRORS" -gt 0 ]; then exit 1; fi
+
+  # ── Job 2: PHPUnit unit tests ────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          coverage: none
+
+      - name: Install Composer dependencies
+        working-directory: publisharticle
+        run: composer install --prefer-dist --no-progress
+
+      - name: Run PHPUnit
+        working-directory: publisharticle
+        run: vendor/bin/phpunit --testdox
+
+  # ── Job 3: Build installation package ────────────────────────────
+  # Triggered by workflow_dispatch (manual "promote" from Gitea UI)
+  package:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build installation archive
+        run: |
+          # The plugin directory IS the installation package
+          PLUGIN_DIR="publisharticle"
+          ARCHIVE_NAME="publisharticle-$(date +%Y%m%d-%H%M%S).zip"
+
+          # Copy config files into the archive root so users can find them
+          cp README.md LICENSE.md "$PLUGIN_DIR/"
+
+          # Create zip
+          zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
+
+          echo "Built: $ARCHIVE_NAME"
+          echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-package
+          path: publisharticle-*.zip
+          retention-days: 30
+          if-no-files-found: error
+
+  # ── Job 4: Create Gitea Release ──────────────────────────────────
+  # Triggered by a push tag v*
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build installation archive
+        run: |
+          PLUGIN_DIR="publisharticle"
+          ARCHIVE_NAME="publisharticle-${GITHUB_REF_NAME}.zip"
+
+          cp README.md LICENSE.md "$PLUGIN_DIR/"
+          zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
+          echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            publisharticle-${{ github.ref_name }}.zip
+          generate_release_notes: true

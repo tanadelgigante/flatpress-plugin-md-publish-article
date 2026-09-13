@@ -1,0 +1,30 @@
+# Publish Article Plugin — protezione della cartella di import
+# Blocca l'accesso web diretto ai file Markdown in attesa di pubblicazione.
+# I file vengono importati automaticamente dal plugin e spostati in done/failed.
+
+# 1) Nessun elenco della directory
+Options -Indexes
+
+# 2) Nega l'accesso a TUTTI i file della cartella di import
+#    (Apache 2.2/2.4). I file .md, .markdown, .txt e qualsiasi altro
+#    contenuto in questa cartella non è visibile via HTTP.
+<IfModule mod_authz_core.c>
+    # Apache 2.4
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    # Apache 2.2
+    Order allow,deny
+    Deny from all
+</IfModule>
+
+# 3) Fallback per server che non rispettano le direttive sopra
+<FilesMatch ".*">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

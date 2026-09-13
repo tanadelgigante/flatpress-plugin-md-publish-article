@@ -1,0 +1,13 @@
+{
+    "name": "flatpress/publisharticle",
+    "description": "Publish Article plugin for FlatPress",
+    "require-dev": {
+        "phpunit/phpunit": "^10.0 || ^11.0"
+    },
+    "autoload": {
+        "classmap": ["ArticleComposer.php", "ArticleParser.php", "ArticleProcessor.php", "ArticleWriter.php", "CategoryResolver.php", "ImageUploader.php", "ArticleImporter.php"]
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
