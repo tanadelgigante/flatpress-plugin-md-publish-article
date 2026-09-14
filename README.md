@@ -63,7 +63,7 @@ Deposit a Markdown file (`.md`, `.markdown`, `.mdown`, `.txt`) in the import fol
 
 The import folder is shown in the admin page together with the pending files.
 
-## Configuration
+## Configuration 
 
 The plugin exposes a settings panel in the FlatPress admin area (**Manage → Plugins → Publish Article**):
 
