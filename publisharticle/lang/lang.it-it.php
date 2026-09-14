@@ -18,6 +18,7 @@ $lang ['admin'] ['plugin'] ['publisharticle'] = array(
 	'date_label'         => 'Data di pubblicazione',
 	'date_help'          => 'Data e ora di pubblicazione (predefinita: adesso).',
 	'publish_now'        => 'Pubblica adesso',
+	'preview_title'      => 'Anteprima',
 	'submit'             => 'Pubblica articolo',
 	'submit_draft'       => 'Salva come bozza',
 

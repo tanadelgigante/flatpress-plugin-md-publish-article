@@ -9,56 +9,47 @@
 	</div>
 {/if}
 
-<!-- Import Folder Status -->
-{if isset($import_folder_path)}
-	<div class="import-info">
-		<dl>
-			<dt>{$plang.import_folder_path}</dt>
-			<dd><code>{$import_folder_path|escape}</code></dd>
-		</dl>
-		{if isset($import_folder_status)}
-			<div class="import-status {if $import_folder_status.protected}protected{else}unprotected{/if}">
-				<strong>{$import_folder_status.server|upper}:</strong> {$import_folder_status.message}
-			</div>
-		{/if}
-	</div>
-{/if}
-
-<!-- Publication form -->
-{html_form class="option-set"}
+{html_form enctype="multipart/form-data" class="option-set"}
 <dl class="option-list">
 
-	<!-- Markdown file -->
+	<!-- Markdown file upload -->
 	<dt><label for="md_file">{$plang.file_label}</label></dt>
 	<dd>
-		<select name="md_file" id="md_file">
-			<option value="">{$plang.file_none}</option>
-			{foreach $md_files as $file}
-				<option value="{$file|escape}"{if $selected_file == $file} selected{/if}>{$file|escape}</option>
-			{/foreach}
-		</select>
+		<input type="file" name="md_file" id="md_file" accept=".md,.markdown,.mdown,.txt"
+			onchange="previewMdFile(this)">
 		<p class="form-help">{$plang.file_help}</p>
 	</dd>
 
-	<!-- Images (multiple) -->
+	<!-- Image upload (multiple) -->
 	<dt><label for="images">{$plang.images_label}</label></dt>
 	<dd>
-		<select name="images[]" id="images" multiple size=6>
-			{foreach $image_files as $img}
-				<option value="{$img|escape}">{$img|escape}</option>
-			{/foreach}
-		</select>
+		<input type="file" name="images[]" id="images" multiple
+			accept="image/jpeg,image/png,image/gif,image/webp"
+			onchange="previewImages(this)">
 		<p class="form-help">{$plang.images_help}</p>
 	</dd>
 
 	<!-- Publication date -->
 	<dt><label for="pub_date">{$plang.date_label}</label></dt>
 	<dd>
-		<input type="datetime-local" name="pub_date" id="pub_date" value="{$pub_date|escape}">
+		<input type="datetime-local" name="pub_date" id="pub_date"
+			value="{$pub_date|escape}">
+		<label style="margin-left:8px">
+			<input type="checkbox" name="publish_now" id="publish_now"
+				onchange="toggleDateField(this)">
+			{$plang.publish_now}
+		</label>
 		<p class="form-help">{$plang.date_help}</p>
 	</dd>
 
 </dl>
+
+<!-- Live preview -->
+<div id="preview-section" style="display:none; margin-top:16px; padding:12px; border:1px solid #ccc; background:#fafafa;">
+	<h3>{$plang.preview_title}</h3>
+	<div id="preview-images" style="margin:8px 0;"></div>
+	<div id="preview-content" style="padding:8px; background:#fff; border:1px solid #eee; min-height:60px; white-space:pre-wrap; font-family:monospace;"></div>
+</div>
 
 <p class="buttonbar">
 	<input type="submit" name="publisharticle-publish" value="{$plang.submit}" class="button">
@@ -67,8 +58,62 @@
 
 {/html_form}
 
+<script>
+function toggleDateField(cb) {
+	var dt = document.getElementById('pub_date');
+	dt.disabled = cb.checked;
+	if (cb.checked) {
+		var now = new Date();
+		var pad = function(n) { return n < 10 ? '0' + n : n; };
+		dt.value = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':' + pad(now.getMinutes());
+	}
+}
+
+function previewMdFile(input) {
+	var file = input.files[0];
+	if (!file) return;
+	var reader = new FileReader();
+	reader.onload = function(e) {
+		var section = document.getElementById('preview-section');
+		var content = document.getElementById('preview-content');
+		section.style.display = 'block';
+		content.textContent = e.target.result;
+	};
+	reader.readAsText(file);
+}
+
+function previewImages(input) {
+	var container = document.getElementById('preview-images');
+	var section = document.getElementById('preview-section');
+	container.innerHTML = '';
+
+	var files = input.files;
+	if (!files || files.length === 0) return;
+
+	section.style.display = 'block';
+	for (var i = 0; i < files.length; i++) {
+		(function(file) {
+			if (!file.type.match(/^image\//)) return;
+			var reader = new FileReader();
+			reader.onload = function(e) {
+				var img = document.createElement('img');
+				img.src = e.target.result;
+				img.style.maxWidth = '200px';
+				img.style.maxHeight = '150px';
+				img.style.margin = '4px';
+				img.style.border = '1px solid #ccc';
+				img.style.borderRadius = '4px';
+				container.appendChild(img);
+			};
+			reader.readAsDataURL(file);
+		})(files[i]);
+	}
+}
+</script>
+
 <!-- Pending files / import all -->
 {if isset($pending_count) && $pending_count > 0}
+	<hr>
 	<form method="post">
 		<p>
 			<input type="submit" name="publisharticle-import-now" value="{$plang.import_now}" class="button">
