@@ -149,7 +149,7 @@ jobs:
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${{ github.run_id }}"
           curl -sS -X PUT \
-            --user "${OWNER}:${GITEA_DUNGEONPAT}" \
+            -H "Authorization: token ${GITEA_DUNGEONPAT}" \
             --data-binary @"$ARCHIVE" \
             "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ARCHIVE}" \
             -o /dev/null -w "Package uploaded: HTTP %{http_code}\n"
@@ -204,7 +204,7 @@ jobs:
           PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
 
           # List files in the package version to find the zip filename
-          FILES=$(curl -sS --user "${OWNER}:${GITEA_DUNGEONPAT}" "${PKG_BASE}/-/files")
+          FILES=$(curl -sS -H "Authorization: token ${GITEA_DUNGEONPAT}" "${PKG_BASE}/-/files")
           ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
           if [ -z "$ZIP_FILE" ]; then
             echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
@@ -213,14 +213,14 @@ jobs:
           fi
 
           mkdir -p release-assets
-          curl -sS --user "${OWNER}:${GITEA_DUNGEONPAT}" \
+          curl -sS -H "Authorization: token ${GITEA_DUNGEONPAT}" \
             "${PKG_BASE}/${ZIP_FILE}" \
             -o "release-assets/publisharticle-${VER}.zip"
           echo "Downloaded: publisharticle-${VER}.zip from ${PKG_VERSION}"
 
           # Clean up: delete the temporary package version
           curl -sS -X DELETE \
-            --user "${OWNER}:${GITEA_DUNGEONPAT}" \
+            -H "Authorization: token ${GITEA_DUNGEONPAT}" \
             "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}" \
             -o /dev/null -w "Deleted package ${PKG_VERSION}: HTTP %{http_code}\n" || \
             echo "Warning: could not delete package ${PKG_VERSION}"
