@@ -21,6 +21,10 @@ $lang ['admin'] ['plugin'] ['publisharticle'] = array(
 	'preview_title'      => 'Anteprima',
 	'submit'             => 'Pubblica articolo',
 	'submit_draft'       => 'Salva come bozza',
+	'msgs' => array(
+		 1  => 'Articolo pubblicato.',
+		-1  => 'Impossibile pubblicare l\'articolo.',
+	),
 
 	// Stato import
 	'import_folder_path' => 'Cartella di import',
@@ -82,4 +86,8 @@ $lang ['admin'] ['plugin'] ['pubartcfg'] = array(
 
 	'failed_subdir'      => 'Sottocartella failed',
 	'failed_subdir_help' => 'Sottocartella della cartella di import in cui vengono spostati i file che non sono stati importati per ispezione.',
+	'msgs' => array(
+		 1  => 'Impostazioni salvate con successo.',
+		-1  => 'Impossibile salvare le impostazioni.',
+	),
 );

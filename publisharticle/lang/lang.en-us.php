@@ -21,6 +21,10 @@ $lang ['admin'] ['plugin'] ['publisharticle'] = array(
 	'preview_title'      => 'Preview',
 	'submit'             => 'Publish article',
 	'submit_draft'       => 'Save as draft',
+	'msgs' => array(
+		 1  => 'Article published.',
+		-1  => 'Article could not be published.',
+	),
 
 	// Import status
 	'import_folder_path' => 'Import folder',
@@ -82,4 +86,8 @@ $lang ['admin'] ['plugin'] ['pubartcfg'] = array(
 
 	'failed_subdir'      => 'Failed subdirectory',
 	'failed_subdir_help' => 'Subfolder of the import folder where files that failed to import are moved for inspection.',
+	'msgs' => array(
+		 1  => 'Settings saved successfully.',
+		-1  => 'Settings could not be saved.',
+	),
 );
