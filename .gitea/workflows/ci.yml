@@ -66,8 +66,8 @@ jobs:
   test:
     runs-on: lab
     steps:
-      - name: Install tooling (Node, PHP, zip)
-        run: apk add --no-cache nodejs npm php-cli zip
+      - name: Install tooling (Node, PHP, zip, curl)
+        run: apk add --no-cache nodejs npm php-cli php-openssl curl zip
 
       - name: Trust the Gitea CA
         env:
@@ -86,7 +86,7 @@ jobs:
 
       - name: Install Composer
         run: |
-          php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+          curl -sS https://getcomposer.org/installer -o composer-setup.php
           php composer-setup.php --install-dir=/usr/local/bin --filename=composer
           rm -f composer-setup.php
           composer --version
