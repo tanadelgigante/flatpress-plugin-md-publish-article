@@ -144,7 +144,7 @@ jobs:
       # "permissions: packages: write" above — no custom PAT required.
       - name: Upload package to Gitea Packages
         env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
@@ -191,7 +191,7 @@ jobs:
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
         env:
-          GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
           set -euo pipefail
           VER="${{ github.event.inputs.release_version }}"
