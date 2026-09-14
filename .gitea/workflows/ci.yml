@@ -3,6 +3,18 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: 'package: build the artifact only | release: publish a previously built artifact'
+        required: true
+        default: 'package'
+      release_version:
+        description: 'Release version, e.g. v0.0.1 (required when job=release)'
+        required: false
+      package_run_id:
+        description: 'Run ID that built the plugin-package artifact (required when job=release)'
+        required: false
 
 permissions:
   contents: read
@@ -11,14 +23,18 @@ jobs:
   # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
   lint:
     runs-on: lab
+    container:
+      image: php:8.2-cli
     steps:
-      - uses: actions/checkout@v4
+      # Node.js is required to run JS-based actions (checkout, etc.).
+      # The ghcr.io/shivammathur/setup-php action itself is a Node action,
+      # so running it inside the container avoids needing node on the host.
+      - name: Install Node.js (for JS actions)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nodejs npm zip
 
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          tools: none
+      - uses: actions/checkout@v4
 
       - name: PHP syntax check
         run: |
@@ -39,14 +55,22 @@ jobs:
   # ── Job 2: PHPUnit unit tests ────────────────────────────────────
   test:
     runs-on: lab
+    container:
+      image: php:8.2-cli
     steps:
+      - name: Install Node.js (for JS actions)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nodejs npm zip
+
       - uses: actions/checkout@v4
 
-      - name: Set up PHP
-        uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.2'
-          coverage: none
+      - name: Install Composer
+        run: |
+          php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+          php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+          rm -f composer-setup.php
+          composer --version
 
       - name: Install Composer dependencies
         working-directory: publisharticle
@@ -59,10 +83,17 @@ jobs:
   # ── Job 3: Build installation package ────────────────────────────
   # Triggered by workflow_dispatch (manual "promote" from Gitea UI)
   package:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
     needs: [lint, test]
     runs-on: lab
+    container:
+      image: php:8.2-cli
     steps:
+      - name: Install Node.js (for JS actions)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nodejs npm zip
+
       - uses: actions/checkout@v4
 
       - name: Build installation archive
@@ -89,32 +120,65 @@ jobs:
           if-no-files-found: error
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
-  # Triggered by a push tag v*
+  # Triggered by a push tag v*, or manually (job=release) to reuse a tested artifact
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release')
     needs: [lint, test]
     runs-on: lab
+    container:
+      image: php:8.2-cli
     permissions:
       contents: write
     steps:
+      - name: Install Node.js (for JS actions)
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends nodejs npm zip git
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
+      # Manual release: reuse the artifact previously built and tested
+      - name: Download package artifact
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-package
+          path: dist
+          run-id: ${{ github.event.inputs.package_run_id }}
+
+      # Tag release: build the archive from the source tree
       - name: Build installation archive
+        if: github.event_name != 'workflow_dispatch'
         run: |
           PLUGIN_DIR="publisharticle"
           ARCHIVE_NAME="publisharticle-${GITHUB_REF_NAME}.zip"
 
           cp README.md LICENSE.md "$PLUGIN_DIR/"
           zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
-          echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+
+      - name: Stage release files
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            VER="${{ github.event.inputs.release_version }}"
+            if [ -z "$VER" ]; then
+              echo "::error::Release version is required (inputs.release_version)" >&2
+              exit 1
+            fi
+            cp dist/*.zip "release-assets/publisharticle-${VER}.zip"
+          else
+            cp "publisharticle-${GITHUB_REF_NAME}.zip" "release-assets/"
+          fi
+          ls -l release-assets
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            publisharticle-${{ github.ref_name }}.zip
+          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_version || github.ref_name }}
+          files: release-assets/*.zip
           generate_release_notes: true
 
       - name: Bump version to next SNAPSHOT
