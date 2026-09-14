@@ -140,19 +140,20 @@ jobs:
           echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
 
       # Upload the zip to the Gitea Generic Package Registry
-      # Uses the built-in job token (GITEA_TOKEN), scoped via the job-level
-      # "permissions: packages: write" above — no custom PAT required.
+      # Uses a dedicated PAT (scope write:package) since the built-in job
+      # token (GITEA_TOKEN) authenticates as the synthetic ActionsUser,
+      # which Gitea does not grant Packages API access to.
       - name: Upload package to Gitea Packages
         env:
-          GITEA_TOKEN: ${{ secrets.DUNGEONPAT }}
+          PKGTOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${{ github.run_id }}"
           curl -sS -X PUT \
-            -H "Authorization: token ${GITEA_TOKEN}" \
-            --data-binary @"$ARCHIVE" \
+            -H "Authorization: token ${PKGTOKEN}" \
+            --upload-file "$ARCHIVE" \
             "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ARCHIVE}" \
             -o /dev/null -w "Package uploaded: HTTP %{http_code}\n"
           echo "UPLOADED_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
@@ -191,7 +192,7 @@ jobs:
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
         env:
-          GITEA_TOKEN: ${{ secrets.DUNGEONPAT }}
+          PKGTOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
           set -euo pipefail
           VER="${{ github.event.inputs.release_version }}"
@@ -206,7 +207,7 @@ jobs:
           PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
 
           # List files in the package version to find the zip filename
-          FILES=$(curl -sS -H "Authorization: token ${GITEA_TOKEN}" "${PKG_BASE}/-/files")
+          FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_BASE}/-/files")
           ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
           if [ -z "$ZIP_FILE" ]; then
             echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
@@ -215,14 +216,14 @@ jobs:
           fi
 
           mkdir -p release-assets
-          curl -sS -H "Authorization: token ${GITEA_TOKEN}" \
+          curl -sS -H "Authorization: token ${PKGTOKEN}" \
             "${PKG_BASE}/${ZIP_FILE}" \
             -o "release-assets/publisharticle-${VER}.zip"
           echo "Downloaded: publisharticle-${VER}.zip from ${PKG_VERSION}"
 
           # Clean up: delete the temporary package version
           curl -sS -X DELETE \
-            -H "Authorization: token ${GITEA_TOKEN}" \
+            -H "Authorization: token ${PKGTOKEN}" \
             "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}" \
             -o /dev/null -w "Deleted package ${PKG_VERSION}: HTTP %{http_code}\n" || \
             echo "Warning: could not delete package ${PKG_VERSION}"
