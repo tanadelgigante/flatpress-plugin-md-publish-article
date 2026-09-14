@@ -67,7 +67,7 @@ jobs:
     runs-on: lab
     steps:
       - name: Install tooling (Node, PHP, zip, curl)
-        run: apk add --no-cache nodejs npm php-cli php-openssl curl zip
+        run: apk add --no-cache nodejs npm php-cli php-openssl php-phar php-mbstring php-iconv curl zip
 
       - name: Trust the Gitea CA
         env:
