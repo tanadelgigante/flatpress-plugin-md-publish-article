@@ -11,7 +11,7 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		function main() {
-			$options = plugin_getoptions('publisharticle');
+            $this->smarty->assign('msgs', array()); // Ensure msgs is always defined
 
 			// Default values
 			$defaults = array(
@@ -47,6 +47,7 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		function onsubmit($data = null) {
+			$this->smarty->assign('msgs', array());
 			if (isset($_POST['publisharticle-submit'])) {
 				$options = plugin_getoptions('publisharticle');
 				if (!is_array($options)) {
