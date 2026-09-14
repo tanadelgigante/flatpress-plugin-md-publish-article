@@ -6,12 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       job:
-        description: 'package: build the artifact only | release: publish a previously built artifact'
+        description: 'package: build the artifact only | release: publish a previously built artifact as v{version.ini without -SNAPSHOT}'
         required: true
         default: 'package'
-      release_version:
-        description: 'Release version, e.g. v0.0.1 (required when job=release)'
-        required: false
       package_run_id:
         description: 'Run ID that built the plugin-package artifact (required when job=release)'
         required: false
@@ -167,6 +164,8 @@ jobs:
     permissions:
       contents: write
       packages: write
+    outputs:
+      release_version: ${{ steps.resolve_version.outputs.version }}
     steps:
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache nodejs npm zip git
@@ -188,6 +187,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Resolve the release version from version.ini (e.g. "0.0.1-SNAPSHOT" -> "v0.0.1")
+      # For tag pushes, github.ref_name already is "v0.0.1"; for manual dispatch, derive it.
+      - name: Resolve release version
+        id: resolve_version
+        run: |
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION="${{ github.ref_name }}"
+          else
+            RAW="$(tr -d '[:space:]' < version.ini)"
+            VERSION="v${RAW%-SNAPSHOT}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
       # Manual release: retrieve the tested zip from the Gitea Package Registry
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
@@ -195,12 +208,12 @@ jobs:
           PKGTOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
           set -euo pipefail
-          VER="${{ github.event.inputs.release_version }}"
           RUN_ID="${{ github.event.inputs.package_run_id }}"
-          if [ -z "$VER" ] || [ -z "$RUN_ID" ]; then
-            echo "::error::Release version and package_run_id are required" >&2
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::package_run_id is required" >&2
             exit 1
           fi
+          VER="${{ steps.resolve_version.outputs.version }}"
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${RUN_ID}"
@@ -246,7 +259,7 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.release_version || github.ref_name }}
+          tag_name: ${{ steps.resolve_version.outputs.version }}
           files: release-assets/*.zip
           generate_release_notes: true
 

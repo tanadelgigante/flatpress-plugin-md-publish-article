@@ -11,7 +11,7 @@ if (class_exists('AdminPanelAction')) {
 		var $langres = 'plugin:publisharticle';
 
 		function setup() {
-			$this->smarty->assign('admin_resource', 'plugin:publisharticle/admin.publisharticle.config');
+			$this->smarty->assign('admin_resource', 'plugin:publisharticle/admin.plugin.panel.publisharticlecfg');
 		}
 
 		function main() {
@@ -92,5 +92,5 @@ if (class_exists('AdminPanelAction')) {
 		}
 	}
 
-	admin_addpanelaction('plugin', 'publisharticle.config', true);
+	admin_addpanelaction('plugin', 'publisharticlecfg', true);
 }
