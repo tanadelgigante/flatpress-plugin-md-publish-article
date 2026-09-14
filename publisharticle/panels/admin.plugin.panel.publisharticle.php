@@ -115,17 +115,9 @@ if (class_exists('AdminPanelAction')) {
 		 */
 		function onsubmit($data = null) {
 
-			$this->smarty->assign(
-				'msgs',
-				array()
-			);
-
-			if (!isset($_POST['publisharticle-import-now'])) {
-				return;
-			}
+			$this->smarty->assign('msgs', array());
 
 			$options = plugin_getoptions('publisharticle');
-
 			if (!is_array($options)) {
 				$options = array();
 			}
@@ -135,85 +127,159 @@ if (class_exists('AdminPanelAction')) {
 				: '';
 
 			/**
-			 * No import directory configured.
+			 * Handle single-file publish or draft.
 			 */
-			if ($importDir === '') {
+			if (
+				isset($_POST['publisharticle-publish']) ||
+				isset($_POST['publisharticle-draft'])
+			) {
 
-				$this->smarty->assign(
-					'success',
-					-1
+				if ($importDir === '' || !is_dir($importDir)) {
+					$this->smarty->assign('success', -1);
+					return 2;
+				}
+
+				$mdFile = isset($_POST['md_file'])
+					? trim((string) $_POST['md_file'])
+					: '';
+
+				if ($mdFile === '') {
+					$this->smarty->assign('success', -1);
+					return 2;
+				}
+
+				$fullPath = rtrim($importDir, '/')
+					. '/' . $mdFile;
+
+				if (!is_file($fullPath)) {
+					$this->smarty->assign('success', -1);
+					return 2;
+				}
+
+				$isDraft = isset(
+					$_POST['publisharticle-draft']
 				);
 
-				return 2;
-			}
+				$pubDate = isset($_POST['pub_date'])
+					? $_POST['pub_date']
+					: '';
 
-			/**
-			 * Execute import.
-			 */
-			$importer = new ArticleImporter(
-				null,
-				$importDir,
-				$options
-			);
+				$images = isset($_POST['images'])
+					? array_map(
+						'trim',
+						(array) $_POST['images']
+					)
+					: array();
 
-			$results = $importer->importAll();
+				$importer = new ArticleImporter(
+					null, $importDir, $options
+				);
 
-			$ok   = 0;
-			$fail = 0;
+				$result = $importer->importOne(
+					$fullPath,
+					array(
+						'status' => $isDraft
+							? 'draft'
+							: 'publish',
+						'pubdate' => $pubDate,
+						'images' => $images,
+					)
+				);
 
-			if (is_array($results)) {
-
-				foreach ($results as $result) {
-
-					if (
-						isset($result['success']) &&
-						$result['success']
-					) {
-						$ok++;
-					} else {
-						$fail++;
-					}
+				if (
+					isset($result['success']) &&
+					$result['success']
+				) {
+					$this->smarty->assign('success', 1);
+				} else {
+					$this->smarty->assign('success', -1);
 				}
 			}
 
 			/**
-			 * Report result.
+			 * Handle bulk import.
 			 */
-			$this->smarty->assign(
-				'success',
-				1
-			);
+			if (isset($_POST['publisharticle-import-now'])) {
 
-			$this->smarty->assign(
-				'import_ok',
-				$ok
-			);
+				if ($importDir === '' || !is_dir($importDir)) {
+					$this->smarty->assign('success', -1);
+					return 2;
+				}
 
-			$this->smarty->assign(
-				'import_fail',
-				$fail
-			);
+				$importer = new ArticleImporter(
+					null, $importDir, $options
+				);
+
+				$results = $importer->importAll();
+
+				$ok   = 0;
+				$fail = 0;
+
+				if (is_array($results)) {
+					foreach ($results as $result) {
+						if (
+							isset($result['success']) &&
+							$result['success']
+						) {
+							$ok++;
+						} else {
+							$fail++;
+						}
+					}
+				}
+
+				$this->smarty->assign('success', 1);
+				$this->smarty->assign('import_ok', $ok);
+				$this->smarty->assign('import_fail', $fail);
+			}
 
 			/**
-			 * Refresh folder information.
+			 * Re-scan and refresh all folder data
+			 * for the template.
 			 */
+			if ($importDir !== '' && is_dir($importDir)) {
+
+				$this->smarty->assign(
+					'import_folder_path',
+					$importDir
+				);
+
+				$importer = new ArticleImporter(
+					null, $importDir, $options
+				);
+
+				$this->smarty->assign(
+					'import_folder_status',
+					$importer->checkProtection()
+				);
+
+				$pending = $importer->scan();
+
+				$this->smarty->assign(
+					'pending_count',
+					is_array($pending) ? count($pending) : 0
+				);
+
+				$this->smarty->assign(
+					'md_files',
+					$this->_scanFiles(
+						$importDir,
+						array('md', 'markdown', 'mdown', 'txt')
+					)
+				);
+
+				$this->smarty->assign(
+					'image_files',
+					$this->_scanFiles(
+						$importDir,
+						array('jpg', 'jpeg', 'png', 'gif', 'webp')
+					)
+				);
+			}
+
 			$this->smarty->assign(
-				'import_folder_path',
-				$importDir
-			);
-
-			$protection = $importer->checkProtection();
-
-			$this->smarty->assign(
-				'import_folder_status',
-				$protection
-			);
-
-			$pending = $importer->scan();
-
-			$this->smarty->assign(
-				'pending_count',
-				is_array($pending) ? count($pending) : 0
+				'pub_date',
+				date('Y-m-d\TH:i')
 			);
 
 			$this->smarty->assign(
@@ -222,6 +288,38 @@ if (class_exists('AdminPanelAction')) {
 			);
 
 			return 2;
+		}
+
+		/**
+		 * Scan a directory for files with given extensions.
+		 *
+		 * @param string $dir
+		 * @param array $extensions
+		 * @return array
+		 */
+		private function _scanFiles($dir, $extensions) {
+
+			$files = array();
+
+			if (!is_dir($dir)) {
+				return $files;
+			}
+
+			$extPattern = '*.{'
+				. implode(',', $extensions)
+				. '}';
+
+			foreach (
+				glob(
+					$dir . '/' . $extPattern,
+					GLOB_BRACE
+				) as $f
+			) {
+				$files[] = basename($f);
+			}
+
+			sort($files);
+			return $files;
 		}
 
 		/**

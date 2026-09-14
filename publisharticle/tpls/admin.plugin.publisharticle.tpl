@@ -9,37 +9,73 @@
 	</div>
 {/if}
 
-<!-- Folder Status -->
-<div class="import-info">
-	<dl>
-		<dt>{$plang.import_folder}</dt>
-		{if isset($import_folder_path)}
+<!-- Import Folder Status -->
+{if isset($import_folder_path)}
+	<div class="import-info">
+		<dl>
+			<dt>{$plang.import_folder_path}</dt>
 			<dd><code>{$import_folder_path|escape}</code></dd>
-		{else}
-			<dd>{$plang.import_folder_not_set}</dd>
+		</dl>
+		{if isset($import_folder_status)}
+			<div class="import-status {if $import_folder_status.protected}protected{else}unprotected{/if}">
+				<strong>{$import_folder_status.server|upper}:</strong> {$import_folder_status.message}
+			</div>
 		{/if}
+	</div>
+{/if}
 
-		<dt>{$plang.pending_files}</dt>
-		<dd>{$pending_count}</dd>
-	</dl>
+<!-- Publication form -->
+{html_form class="option-set"}
+<dl class="option-list">
 
-	{if isset($import_folder_status)}
-		<div class="import-status {if $import_folder_status.protected}protected{else}unprotected{/if}">
-			<strong>{$import_folder_status.server|upper}:</strong> {$import_folder_status.message}
-		</div>
-	{/if}
-</div>
+	<!-- Markdown file -->
+	<dt><label for="md_file">{$plang.file_label}</label></dt>
+	<dd>
+		<select name="md_file" id="md_file">
+			<option value="">{$plang.file_none}</option>
+			{foreach $md_files as $file}
+				<option value="{$file|escape}"{if $selected_file == $file} selected{/if}>{$file|escape}</option>
+			{/foreach}
+		</select>
+		<p class="form-help">{$plang.file_help}</p>
+	</dd>
 
-<!-- Import Button -->
-{if $pending_count > 0}
+	<!-- Images (multiple) -->
+	<dt><label for="images">{$plang.images_label}</label></dt>
+	<dd>
+		<select name="images[]" id="images" multiple size=6>
+			{foreach $image_files as $img}
+				<option value="{$img|escape}">{$img|escape}</option>
+			{/foreach}
+		</select>
+		<p class="form-help">{$plang.images_help}</p>
+	</dd>
+
+	<!-- Publication date -->
+	<dt><label for="pub_date">{$plang.date_label}</label></dt>
+	<dd>
+		<input type="datetime-local" name="pub_date" id="pub_date" value="{$pub_date|escape}">
+		<p class="form-help">{$plang.date_help}</p>
+	</dd>
+
+</dl>
+
+<p class="buttonbar">
+	<input type="submit" name="publisharticle-publish" value="{$plang.submit}" class="button">
+	<input type="submit" name="publisharticle-draft" value="{$plang.submit_draft}" class="button">
+</p>
+
+{/html_form}
+
+<!-- Pending files / import all -->
+{if isset($pending_count) && $pending_count > 0}
 	<form method="post">
 		<p>
 			<input type="submit" name="publisharticle-import-now" value="{$plang.import_now}" class="button">
-			<span class="form-help">{$plang.import_now_help}</span>
 		</p>
 	</form>
 {else}
-	<p class="import-no-pending">{$plang.no_pending_files}</p>
+	<p>{$plang.no_pending_files}</p>
 {/if}
 
 <!-- Recent Imports -->

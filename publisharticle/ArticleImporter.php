@@ -262,6 +262,80 @@ class ArticleImporter {
     }
 
     /**
+     * Imports a single Markdown file manually (from the publish panel).
+     *
+     * Unlike importFile(), this does NOT move the source file.
+     *
+     * @param string $file Absolute path to the .md file
+     * @param array  $overrides Optional: status, pubdate, images
+     * @return array Result with success, id, message, images
+     */
+    public function importOne($file, $overrides = []) {
+        $base = basename($file);
+        $result = [
+            'success' => false,
+            'file' => $base,
+            'id' => false,
+            'message' => '',
+            'images' => [],
+        ];
+
+        if (!is_file($file)) {
+            $result['message'] = 'File not found.';
+            return $result;
+        }
+
+        $content = file_get_contents($file);
+        if ($content === false) {
+            $result['message'] = 'Unable to read file.';
+            return $result;
+        }
+
+        // Import selected images if provided
+        $images = [];
+        if (!empty($overrides['images']) && is_array($overrides['images'])) {
+            $dir = dirname($file);
+            foreach ($overrides['images'] as $imgName) {
+                $imgPath = $dir . '/' . $imgName;
+                if (is_file($imgPath)) {
+                    $rel = $this->processor
+                        ->getImageUploader()
+                        ->importLocal($imgPath, pathinfo($base, PATHINFO_FILENAME));
+                    if ($rel !== false) {
+                        $images[] = $rel;
+                    }
+                }
+            }
+        }
+
+        // Inject overrides into frontmatter
+        $content = $this->applyDefaults($content, $overrides);
+
+        // Process and publish
+        $res = $this->processor->process(
+            $content, [], pathinfo($base, PATHINFO_FILENAME)
+        );
+
+        if ($res === false) {
+            $result['message'] = 'Processing failed.';
+            return $result;
+        }
+
+        $result['success'] = true;
+        $result['id'] = $res['id'];
+        $result['images'] = array_merge(
+            $images,
+            isset($res['images']) ? $res['images'] : []
+        );
+        $result['message'] = $res['scheduled']
+            ? 'Scheduled for '
+                . date('Y-m-d H:i:s', $res['scheduled'])
+            : 'Published';
+
+        return $result;
+    }
+
+    /**
      * Scans the import folder for Markdown files.
      *
      * @return array List of absolute file paths
@@ -405,10 +479,21 @@ class ArticleImporter {
      * ArticleProcessor can read them normally.
      *
      * @param string $content Raw markdown content with optional frontmatter
+     * @param array  $overrides Optional overrides: status, pubdate
      * @return string Content with defaults applied
      */
-    public function applyDefaults($content) {
+    public function applyDefaults($content, $overrides = []) {
         $inject = [];
+
+        // Manual overrides take precedence
+        if (!empty($overrides['status'])) {
+            $inject[] = 'status: ' . $overrides['status'];
+        }
+
+        if (!empty($overrides['pubdate'])) {
+            $dt = str_replace('T', ' ', $overrides['pubdate']) . ':00';
+            $inject[] = 'date: ' . $dt;
+        }
 
         if ($this->defaultCategory !== '') {
             $inject[] = 'categories: ' . $this->defaultCategory;

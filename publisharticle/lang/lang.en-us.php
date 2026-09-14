@@ -5,15 +5,50 @@
 $lang ['admin'] ['plugin'] ['submenu'] ['publisharticle'] = 'Publish Article';
 $lang ['admin'] ['plugin'] ['submenu'] ['pubartcfg'] = 'Publish Article – Settings';
 
-// Shared keys (both panels use $langres = 'plugin:publisharticle')
+// ── Publish panel (action: publisharticle) ──────────────────────
 $lang ['admin'] ['plugin'] ['publisharticle'] = array(
+	'head'               => 'Publish Article',
+	'description'        => 'Create and publish a new article from Markdown files.',
+	'file_label'         => 'Markdown file',
+	'file_help'          => 'Select a <code>.md</code> file from the import folder.',
+	'file_none'          => '— No files available —',
+	'images_label'       => 'Images',
+	'images_help'        => 'Select one or more images to attach to the article.',
+	'images_none'        => '— No images available —',
+	'date_label'         => 'Publication date',
+	'date_help'          => 'Date and time of publication (default: now).',
+	'publish_now'        => 'Publish now',
+	'submit'             => 'Publish article',
+	'submit_draft'       => 'Save as draft',
 
-	// ── Config panel (Plugin menu) ──────────────────────────────
-	'config_head'        => 'Publish Article – Settings',
-	'config_description' => 'Configure the import folder and how articles are imported into FlatPress.',
-	'config_save'        => 'Save settings',
-	'config_saved'       => 'Settings saved successfully.',
-	'config_error'       => 'Invalid cron expression.',
+	// Import status
+	'import_folder_path' => 'Import folder',
+	'import_folder_not_set' => 'No import folder configured. Go to Settings → Plugins → Publish Article.',
+	'pending_files'      => 'Files waiting to be imported',
+	'import_now'         => 'Import all pending',
+	'no_pending_files'   => 'No files are waiting to be imported.',
+	'import_done'        => 'Import completed.',
+	'import_error'       => 'Import failed.',
+
+	// Recent imports
+	'recent_imports'     => 'Recent imports',
+	'log_file'           => 'File',
+	'log_status'         => 'Status',
+	'log_time'           => 'Time',
+
+	// Folder protection
+	'caddy_instructions'   => 'For Caddy 2: include the extracted snippet in your Caddyfile (see the README of the plugin).',
+	'nginx_instructions'   => 'For Nginx: add <code>location ~ ^/fp-content/content/import-in/ { deny all; }</code> to your server block.',
+	'apache_instructions'  => 'For Apache/LiteSpeed: create a <code>.htaccess</code> file with <code>Require all denied</code> in the folder.',
+);
+
+// ── Config panel (action: pubartcfg) ───────────────────────────
+$lang ['admin'] ['plugin'] ['pubartcfg'] = array(
+	'head'        => 'Publish Article – Settings',
+	'description' => 'Configure the import folder and how articles are imported into FlatPress.',
+	'save'        => 'Save settings',
+	'saved'       => 'Settings saved successfully.',
+	'error'       => 'Invalid cron expression.',
 
 	'import_folder'      => 'Import folder',
 	'import_folder_help' => 'Absolute or relative path to the folder where Markdown files are dropped for automatic publishing. Leave empty to use the default (<code>fp-content/content/import-in/</code>).',
@@ -46,29 +81,4 @@ $lang ['admin'] ['plugin'] ['publisharticle'] = array(
 
 	'failed_subdir'      => 'Failed subdirectory',
 	'failed_subdir_help' => 'Subfolder of the import folder where files that failed to import are moved for inspection.',
-
-	// ── Publish panel (Articoli/Content menu) ───────────────────
-	'head'               => 'Publish Article',
-	'description'        => 'Import Markdown articles from the configured import folder into FlatPress.',
-	'import_folder_not_set' => 'No import folder configured. Go to Settings → Plugins → Publish Article.',
-
-	'pending_files'      => 'Files waiting to be imported',
-	'import_now'         => 'Import now',
-	'import_now_help'    => 'Scan the import folder and publish all pending articles.',
-	'no_pending_files'   => 'No files are waiting to be imported.',
-
-	'import_done'        => 'Import completed.',
-	'import_error'       => 'Import failed.',
-
-	'recent_imports'     => 'Recent imports',
-	'log_file'           => 'File',
-	'log_status'         => 'Status',
-	'log_time'           => 'Time',
-
-	// Protection instructions
-	'caddy_instructions'   => 'For Caddy 2: include the extracted snippet in your Caddyfile (see the README of the plugin).',
-	'nginx_instructions'   => 'For Nginx: add <code>location ~ ^/fp-content/content/import-in/ { deny all; }</code> to your server block.',
-	'apache_instructions'  => 'For Apache/LiteSpeed: create a <code>.htaccess</code> file with <code>Require all denied</code> in the folder.',
-
-	'submit' => 'Save configuration',
 );

@@ -20,7 +20,7 @@ if (class_exists('AdminPanelAction')) {
 	 */
 	class admin_plugin_pubartcfg extends AdminPanelAction {
 
-		var $langres = 'plugin:publisharticle';
+		var $langres = 'plugin:pubartcfg';
 
 		/**
 		 * Configure Smarty resource.
@@ -28,7 +28,7 @@ if (class_exists('AdminPanelAction')) {
 		function setup() {
 			$this->smarty->assign(
 				'admin_resource',
-				'plugin:publisharticle/admin.plugin.panel.pubartcfg'
+				'plugin:pubartcfg/admin.plugin.panel.pubartcfg'
 			);
 		}
 

@@ -1,11 +1,11 @@
-<h2>{$plang.config_head}</h2>
-<p>{$plang.config_description}</p>
+<h2>{$plang.head}</h2>
+<p>{$plang.description}</p>
 
 {include file="shared:errorlist.tpl"}
 
 {if isset($success)}
 	<div class="notice{if $success < 0} error{/if}">
-		{if $success > 0}{$plang.config_saved}{else}{$plang.config_error}{/if}
+		{if $success > 0}{$plang.saved}{else}{$plang.error}{/if}
 	</div>
 {/if}
 
@@ -71,7 +71,7 @@
 </dl>
 
 <p>
-	<input type="submit" name="publisharticle-config-submit" value="{$plang.config_save}" class="button">
+	<input type="submit" name="publisharticle-config-submit" value="{$plang.save}" class="button">
 </p>
 
 {/html_form}
