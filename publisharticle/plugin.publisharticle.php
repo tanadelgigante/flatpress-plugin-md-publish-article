@@ -354,7 +354,7 @@ function publisharticle_process_scheduled() {
 if (class_exists('AdminPanelAction')) {
 	// Register admin panels
 	require_once plugin_getdir('publisharticle') . 'panels/admin.plugin.panel.publisharticle.php';
-	require_once plugin_getdir('publisharticle') . 'panels/admin.plugin.panel.publisharticlecfg.php';
+	require_once plugin_getdir('publisharticle') . 'panels/admin.plugin.panel.pubartcfg.php';
 }
 
 // Wire the hooks
