@@ -142,9 +142,8 @@ jobs:
       # Upload the zip to the Gitea Generic Package Registry
       - name: Upload package to Gitea Packages
         env:
-          GITEA_DUNGEONPAT: ${{ secrets.DUNGEONPAT }}
+          GITEA_DUNGEONPAT="${{ secrets.GITEA_TOKEN }}"
         run: |
-          echo "token length: ${GITEA_DUNGEONPAT}"
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
@@ -190,7 +189,7 @@ jobs:
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
         env:
-          GITEA_DUNGEONPAT: ${{ secrets.DUNGEONPAT }}
+          GITEA_DUNGEONPAT="${{ secrets.GITEA_TOKEN }}"
         run: |
           set -euo pipefail
           VER="${{ github.event.inputs.release_version }}"
