@@ -1,4 +1,10 @@
 <?php
+/**
+ * Publish Article – Publication panel (Articoli/Content menu)
+ *
+ * Shows import folder status, pending files count, and a button
+ * to trigger a manual import.
+ */
 
 if (class_exists('AdminPanelAction')) {
 	require_once plugin_getdir('publisharticle') . 'ArticleImporter.php';
@@ -11,79 +17,116 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		function main() {
-            $this->smarty->assign('msgs', array()); // Ensure msgs is always defined
-
-			// Default values
-			$defaults = array(
-				'import_folder'    => '',
-				'import_frequency' => 'every_page_load', // 'manual' | 'every_page_load' | cron expression
-				'default_category' => '',
-				'default_status'   => 'publish',
-				'done_subdir'      => 'done',
-				'failed_subdir'    => 'failed',
-			);
+			$this->smarty->assign('msgs', array());
 
 			$options = plugin_getoptions('publisharticle');
-			$options = is_array($options) ? array_merge($defaults, $options) : $defaults;
-
-			foreach ($options as $key => $value) {
-				$this->smarty->assign($key, $value);
+			if (!is_array($options)) {
+				$options = array();
 			}
 
-			// Show import folder status
+			// Folder info
 			if (!empty($options['import_folder'])) {
+				$this->smarty->assign('import_folder_path', $options['import_folder']);
 				$importer = new ArticleImporter(null, $options['import_folder'], $options);
 				$protection = $importer->checkProtection();
 				$this->smarty->assign('import_folder_status', $protection);
 				$this->smarty->assign('pending_count', count($importer->scan()));
+			} else {
+				$this->smarty->assign('pending_count', 0);
 			}
 
-			// Helper for the template: pre-selected frequency option
-			$freq = $options['import_frequency'];
-			$is_cron = ($freq !== 'manual' && $freq !== 'every_page_load');
-			$this->smarty->assign('is_manual', $freq === 'manual');
-			$this->smarty->assign('is_every_page_load', $freq === 'every_page_load');
-			$this->smarty->assign('is_cron', $is_cron);
-			$this->smarty->assign('cron_schedule', $is_cron ? $freq : '0 * * * *');
+			// Recent import log (from last 10 entries in done/failed subdirs)
+			$this->smarty->assign('recent_imports', $this->_getRecentImports($options));
 		}
 
 		function onsubmit($data = null) {
 			$this->smarty->assign('msgs', array());
-			if (isset($_POST['publisharticle-submit'])) {
+
+			if (isset($_POST['publisharticle-import-now'])) {
 				$options = plugin_getoptions('publisharticle');
 				if (!is_array($options)) {
 					$options = array();
 				}
 
-				$options['import_folder']    = isset($_POST['import_folder']) ? trim((string) $_POST['import_folder']) : '';
-				$options['default_category'] = isset($_POST['default_category']) ? trim((string) $_POST['default_category']) : '';
-				$options['default_status']   = isset($_POST['default_status']) ? (string) $_POST['default_status'] : 'publish';
-				$options['done_subdir']      = isset($_POST['done_subdir']) ? trim((string) $_POST['done_subdir']) : 'done';
-				$options['failed_subdir']    = isset($_POST['failed_subdir']) ? trim((string) $_POST['failed_subdir']) : 'failed';
+				$importDir = !empty($options['import_folder']) ? $options['import_folder'] : '';
+				if ($importDir === '') {
+					$this->smarty->assign('success', -1);
+					return 2;
+				}
 
-				// Frequency: 'manual', 'every_page_load', or a custom cron expression
-				$freq = isset($_POST['import_frequency']) ? (string) $_POST['import_frequency'] : 'every_page_load';
-				if ($freq === 'custom') {
-					$cron = isset($_POST['cron_schedule']) ? trim((string) $_POST['cron_schedule']) : '0 * * * *';
-					if (function_exists('publisharticle_valid_cron') && !publisharticle_valid_cron($cron)) {
-						$this->smarty->assign('success', -1);
-						return 2;
+				$importer = new ArticleImporter(null, $importDir, $options);
+				$results  = $importer->importAll();
+
+				$ok  = 0;
+				$fail = 0;
+				if (is_array($results)) {
+					foreach ($results as $r) {
+						if (isset($r['success']) && $r['success']) {
+							$ok++;
+						} else {
+							$fail++;
+						}
 					}
-					$freq = $cron;
 				}
-				$options['import_frequency'] = $freq;
 
-				// Persist using the FlatPress options API
-				foreach ($options as $key => $value) {
-					plugin_addoption('publisharticle', $key, $value);
-				}
-				plugin_saveoptions('publisharticle');
 				$this->smarty->assign('success', 1);
-			} else {
-				$this->smarty->assign('success', -1);
+				$this->smarty->assign('import_ok', $ok);
+				$this->smarty->assign('import_fail', $fail);
+
+				// Re-assign folder info for the view
+				$this->smarty->assign('import_folder_path', $importDir);
+				$protection = $importer->checkProtection();
+				$this->smarty->assign('import_folder_status', $protection);
+				$this->smarty->assign('pending_count', count($importer->scan()));
+				$this->smarty->assign('recent_imports', $this->_getRecentImports($options));
+
+				return 2;
+			}
+		}
+
+		/**
+		 * Scan done/failed subdirs for recently imported files.
+		 * @return array
+		 */
+		private function _getRecentImports($options) {
+			$imports = array();
+			$importDir = isset($options['import_folder']) ? $options['import_folder'] : '';
+			if ($importDir === '' || !is_dir($importDir)) {
+				return $imports;
 			}
 
-			return 2;
+			$doneDir    = rtrim($importDir, '/') . '/' . (isset($options['done_subdir']) ? $options['done_subdir'] : 'done');
+			$failedDir  = rtrim($importDir, '/') . '/' . (isset($options['failed_subdir']) ? $options['failed_subdir'] : 'failed');
+
+			// Collect from done/ (success)
+			if (is_dir($doneDir)) {
+				foreach (glob($doneDir . '/{*.md,*.markdown,*.mdown,*.txt}', GLOB_BRACE) as $f) {
+					$imports[] = array(
+						'file'    => basename($f),
+						'success' => true,
+						'error'   => '',
+						'time'    => date('Y-m-d H:i:s', filemtime($f)),
+					);
+				}
+			}
+
+			// Collect from failed/ (failure)
+			if (is_dir($failedDir)) {
+				foreach (glob($failedDir . '/{*.md,*.markdown,*.mdown,*.txt}', GLOB_BRACE) as $f) {
+					$imports[] = array(
+						'file'    => basename($f),
+						'success' => false,
+						'error'   => 'import failed',
+						'time'    => date('Y-m-d H:i:s', filemtime($f)),
+					);
+				}
+			}
+
+			// Sort by time descending, limit to 20
+			usort($imports, function ($a, $b) {
+				return strcmp($b['time'], $a['time']);
+			});
+			return array_slice($imports, 0, 20);
 		}
 	}
 

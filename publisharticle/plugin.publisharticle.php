@@ -352,7 +352,9 @@ function publisharticle_process_scheduled() {
  * Registers the admin panel when the AdminPanelAction class is available.
  */
 if (class_exists('AdminPanelAction')) {
+	// Register admin panels
 	require_once plugin_getdir('publisharticle') . 'panels/admin.plugin.panel.publisharticle.php';
+	require_once plugin_getdir('publisharticle') . 'panels/admin.publisharticle.config.php';
 }
 
 // Wire the hooks
