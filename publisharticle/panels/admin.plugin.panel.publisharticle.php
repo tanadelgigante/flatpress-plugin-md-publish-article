@@ -23,6 +23,7 @@ if (class_exists('AdminPanelAction')) {
 				'failed_subdir'    => 'failed',
 			);
 
+			$options = plugin_getoptions('publisharticle');
 			$options = is_array($options) ? array_merge($defaults, $options) : $defaults;
 
 			foreach ($options as $key => $value) {
@@ -86,5 +87,5 @@ if (class_exists('AdminPanelAction')) {
 		}
 	}
 
-	admin_addpanelaction('plugin', 'publisharticle', true);
+	admin_addpanelaction('content', 'publisharticle', true);
 }

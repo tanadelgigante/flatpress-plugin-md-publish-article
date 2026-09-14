@@ -101,13 +101,14 @@ jobs:
 
   # ── Job 3: Build installation package ────────────────────────────
   # Triggered by workflow_dispatch (manual "promote" from Gitea UI).
-  # Stores the zip in a git tag so the release job can retrieve it.
+  # Uploads the zip to the Gitea Generic Package Registry for the release job to retrieve.
   package:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
     needs: [lint, test]
     runs-on: lab
     permissions:
-      contents: write
+      contents: read
+      packages: write
     steps:
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache nodejs npm zip git
@@ -138,18 +139,21 @@ jobs:
           # Store archive name for the upload step
           echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
 
-      # Store the zip in a temporary git tag for the release job to retrieve
-      - name: Store build artifact in a git tag
+      # Upload the zip to the Gitea Generic Package Registry
+      - name: Upload package to Gitea Packages
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          BUILD_TAG="build-${GITHUB_RUN_ID}"
-          git config user.name "CI bot"
-          git config user.email "ci-bot@localhost"
-          git add "$ARCHIVE"
-          git commit -m "Build artifact: $ARCHIVE"
-          git tag "$BUILD_TAG"
-          git push origin "$BUILD_TAG"
-          echo "Build tag pushed: $BUILD_TAG"
+          OWNER="${{ github.repository_owner }}"
+          PKG_NAME="publisharticle"
+          PKG_VERSION="build-${{ github.run_id }}"
+          curl -sS -X PUT \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            --data-binary @"$ARCHIVE" \
+            "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ARCHIVE}" \
+            -o /dev/null -w "Package uploaded: HTTP %{http_code}\n"
+          echo "UPLOADED_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
   # Triggered by a push tag v*, or manually (job=release) to reuse a tested artifact
@@ -159,6 +163,7 @@ jobs:
     runs-on: lab
     permissions:
       contents: write
+      packages: write
     steps:
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache nodejs npm zip git
@@ -180,29 +185,45 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Manual release: retrieve the tested zip from the build tag
+      # Manual release: retrieve the tested zip from the Gitea Package Registry
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           VER="${{ github.event.inputs.release_version }}"
-          if [ -z "$VER" ]; then
-            echo "::error::Release version is required (inputs.release_version)" >&2
+          RUN_ID="${{ github.event.inputs.package_run_id }}"
+          if [ -z "$VER" ] || [ -z "$RUN_ID" ]; then
+            echo "::error::Release version and package_run_id are required" >&2
             exit 1
           fi
-          BUILD_TAG="build-${{ github.event.inputs.package_run_id }}"
-          mkdir -p release-assets
-          # Extract the zip from the git tag
-          git fetch origin "$BUILD_TAG"
-          ZIP_FILE=$(git ls-tree --name-only "$BUILD_TAG" | grep '\.zip$')
+          OWNER="${{ github.repository_owner }}"
+          PKG_NAME="publisharticle"
+          PKG_VERSION="build-${RUN_ID}"
+          PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
+
+          # List files in the package version to find the zip filename
+          FILES=$(curl -sS -H "Authorization: token ${GITEA_TOKEN}" "${PKG_BASE}/-/files")
+          ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
           if [ -z "$ZIP_FILE" ]; then
-            echo "::error::No zip file found in build tag $BUILD_TAG" >&2
+            echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
+            echo "API response: $FILES" >&2
             exit 1
           fi
-          git show "${BUILD_TAG}:${ZIP_FILE}" > "release-assets/publisharticle-${VER}.zip"
-          echo "Retrieved: publisharticle-${VER}.zip from $BUILD_TAG"
-          # Clean up the temporary build tag
-          git push origin --delete "$BUILD_TAG" || echo "Warning: could not delete build tag $BUILD_TAG"
+
+          mkdir -p release-assets
+          curl -sS -H "Authorization: token ${GITEA_TOKEN}" \
+            "${PKG_BASE}/${ZIP_FILE}" \
+            -o "release-assets/publisharticle-${VER}.zip"
+          echo "Downloaded: publisharticle-${VER}.zip from ${PKG_VERSION}"
+
+          # Clean up: delete the temporary package version
+          curl -sS -X DELETE \
+            -H "Authorization: token ${GITEA_TOKEN}" \
+            "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}" \
+            -o /dev/null -w "Deleted package ${PKG_VERSION}: HTTP %{http_code}\n" || \
+            echo "Warning: could not delete package ${PKG_VERSION}"
 
       # Tag release: build the archive from the source tree
       - name: Build installation archive
