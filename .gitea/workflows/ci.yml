@@ -100,14 +100,17 @@ jobs:
         run: vendor/bin/phpunit --testdox
 
   # ── Job 3: Build installation package ────────────────────────────
-  # Triggered by workflow_dispatch (manual "promote" from Gitea UI)
+  # Triggered by workflow_dispatch (manual "promote" from Gitea UI).
+  # Stores the zip in a git tag so the release job can retrieve it.
   package:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
     needs: [lint, test]
     runs-on: lab
+    permissions:
+      contents: write
     steps:
-      - name: Install tooling (Node, zip)
-        run: apk add --no-cache nodejs npm zip
+      - name: Install tooling (Node, zip, git)
+        run: apk add --no-cache nodejs npm zip git
 
       - name: Trust the Gitea CA
         env:
@@ -126,26 +129,27 @@ jobs:
 
       - name: Build installation archive
         run: |
-          # The plugin directory IS the installation package
           PLUGIN_DIR="publisharticle"
           ARCHIVE_NAME="publisharticle-$(date +%Y%m%d-%H%M%S).zip"
 
-          # Copy config files into the archive root so users can find them
           cp README.md LICENSE.md "$PLUGIN_DIR/"
-
-          # Create zip
           zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
 
-          echo "Built: $ARCHIVE_NAME"
+          # Store archive name for the upload step
           echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
 
-      - name: Upload package artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: plugin-package
-          path: publisharticle-*.zip
-          retention-days: 30
-          if-no-files-found: error
+      # Store the zip in a temporary git tag for the release job to retrieve
+      - name: Store build artifact in a git tag
+        run: |
+          set -euo pipefail
+          BUILD_TAG="build-${GITHUB_RUN_ID}"
+          git config user.name "CI bot"
+          git config user.email "ci-bot@localhost"
+          git add "$ARCHIVE"
+          git commit -m "Build artifact: $ARCHIVE"
+          git tag "$BUILD_TAG"
+          git push origin "$BUILD_TAG"
+          echo "Build tag pushed: $BUILD_TAG"
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
   # Triggered by a push tag v*, or manually (job=release) to reuse a tested artifact
@@ -176,14 +180,29 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Manual release: reuse the artifact previously built and tested
-      - name: Download package artifact
+      # Manual release: retrieve the tested zip from the build tag
+      - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
-        with:
-          name: plugin-package
-          path: dist
-          run-id: ${{ github.event.inputs.package_run_id }}
+        run: |
+          set -euo pipefail
+          VER="${{ github.event.inputs.release_version }}"
+          if [ -z "$VER" ]; then
+            echo "::error::Release version is required (inputs.release_version)" >&2
+            exit 1
+          fi
+          BUILD_TAG="build-${{ github.event.inputs.package_run_id }}"
+          mkdir -p release-assets
+          # Extract the zip from the git tag
+          git fetch origin "$BUILD_TAG"
+          ZIP_FILE=$(git ls-tree --name-only "$BUILD_TAG" | grep '\.zip$')
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::No zip file found in build tag $BUILD_TAG" >&2
+            exit 1
+          fi
+          git show "${BUILD_TAG}:${ZIP_FILE}" > "release-assets/publisharticle-${VER}.zip"
+          echo "Retrieved: publisharticle-${VER}.zip from $BUILD_TAG"
+          # Clean up the temporary build tag
+          git push origin --delete "$BUILD_TAG" || echo "Warning: could not delete build tag $BUILD_TAG"
 
       # Tag release: build the archive from the source tree
       - name: Build installation archive
@@ -191,25 +210,14 @@ jobs:
         run: |
           PLUGIN_DIR="publisharticle"
           ARCHIVE_NAME="publisharticle-${GITHUB_REF_NAME}.zip"
-
           cp README.md LICENSE.md "$PLUGIN_DIR/"
           zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
-
-      - name: Stage release files
-        run: |
-          set -euo pipefail
           mkdir -p release-assets
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            VER="${{ github.event.inputs.release_version }}"
-            if [ -z "$VER" ]; then
-              echo "::error::Release version is required (inputs.release_version)" >&2
-              exit 1
-            fi
-            cp dist/*.zip "release-assets/publisharticle-${VER}.zip"
-          else
-            cp "publisharticle-${GITHUB_REF_NAME}.zip" "release-assets/"
-          fi
-          ls -l release-assets
+          cp "$ARCHIVE_NAME" release-assets/
+
+      - name: List release assets
+        if: github.event_name != 'workflow_dispatch'
+        run: ls -l release-assets/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
