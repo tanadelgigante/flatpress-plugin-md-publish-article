@@ -28,7 +28,7 @@ if (class_exists('AdminPanelAction')) {
 	 *
 	 *   get_class($this) . '_' . $action
 	 */
-	class AdminPanel_content_publisharticle extends AdminPanelAction {
+	class admin_plugin_publisharticle extends AdminPanelAction {
 
 		var $langres = 'plugin:publisharticle';
 
@@ -338,10 +338,10 @@ if (class_exists('AdminPanelAction')) {
 
 	/**
 	 * Register publication action under the
-	 * FlatPress "content" panel.
+	 * FlatPress "plugin" panel.
 	 */
 	admin_addpanelaction(
-		'content',
+		'plugin',
 		'publisharticle',
 		true
 	);

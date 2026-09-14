@@ -18,7 +18,7 @@ if (class_exists('AdminPanelAction')) {
 	 *
 	 *   get_class($this) . '_' . $action
 	 */
-	class AdminPanel_plugin_pubartcfg extends AdminPanelAction {
+	class admin_plugin_pubartcfg extends AdminPanelAction {
 
 		var $langres = 'plugin:publisharticle';
 

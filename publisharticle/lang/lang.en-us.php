@@ -4,7 +4,6 @@
 // Menu labels
 $lang ['admin'] ['plugin'] ['submenu'] ['publisharticle'] = 'Publish Article';
 $lang ['admin'] ['plugin'] ['submenu'] ['pubartcfg'] = 'Publish Article – Settings';
-$lang ['admin'] ['content'] ['submenu'] ['publisharticle'] = 'Publish Article';
 
 // Shared keys (both panels use $langres = 'plugin:publisharticle')
 $lang ['admin'] ['plugin'] ['publisharticle'] = array(
