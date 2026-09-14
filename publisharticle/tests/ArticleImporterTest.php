@@ -65,8 +65,7 @@ class ArticleImporterTest extends TestCase {
 
         $this->assertStringContainsString('categories: 3', $result);
         // The default "7" must not be injected
-        $this->assertStringNotContainsString('categories: 3', $result);
-        $this->assertStringNotContainsString('categories: 7', str_replace('categories: 3', '', $result));
+        $this->assertStringNotContainsString('categories: 7', $result);
     }
 
     public function testApplyDefaultsAddsDraftStatus(): void {

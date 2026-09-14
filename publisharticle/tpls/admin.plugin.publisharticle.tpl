@@ -40,21 +40,19 @@
 		<p class="form-help">{$plang.import_frequency_help}</p>
 
 		<!-- Custom cron schedule (shown when custom is selected) -->
-		<div id="cron_schedule_field" style="display: {if $is_cron}block{else}none{/if};">
-			<dt><label for="cron_schedule">{$plang.cron_schedule}</label></dt>
-			<dd>
-				<input type="text" name="cron_schedule" id="cron_schedule" value="{$import_frequency|escape}" size="30">
-				<p class="form-help">{$plang.cron_schedule_help}</p>
-				<p class="cron-examples">
-					<strong>Examples:</strong>
-					<ul>
-						<li><code>0 * * * *</code> — {$plang.cron_hourly_example}</li>
-						<li><code>0 2 * * *</code> — {$plang.cron_daily_example}</li>
-						<li><code>0 */6 * * *</code> — {$plang.cron_every6h_example}</li>
-						<li><code>*/15 * * * *</code> — {$plang.cron_every15m_example}</li>
-					</ul>
-				</p>
-			</dd>
+		<div id="cron_schedule_field" style="display: {if $is_cron}block{else}none{/if}; margin-top: 10px;">
+			<label for="cron_schedule"><strong>{$plang.cron_schedule}</strong></label><br>
+			<input type="text" name="cron_schedule" id="cron_schedule" value="{$cron_schedule|escape}" size="30">
+			<p class="form-help">{$plang.cron_schedule_help}</p>
+			<div class="cron-examples">
+				<strong>Examples:</strong>
+				<ul>
+					<li><code>0 * * * *</code> — {$plang.cron_hourly_example}</li>
+					<li><code>0 2 * * *</code> — {$plang.cron_daily_example}</li>
+					<li><code>0 */6 * * *</code> — {$plang.cron_every6h_example}</li>
+					<li><code>*/15 * * * *</code> — {$plang.cron_every15m_example}</li>
+				</ul>
+			</div>
 		</div>
 	</dd>
 

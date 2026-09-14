@@ -85,12 +85,31 @@ class ArticleComposerTest extends TestCase {
         $this->assertSame('[code]foo[/code]', $this->composer->markdownToBBCode('`foo`'));
     }
 
+    public function testMarkdownHeading1(): void {
+        $this->assertSame('[h2]Main[/h2]', $this->composer->markdownToBBCode('# Main'));
+    }
+
     public function testMarkdownHeading2(): void {
         $this->assertSame('[h2]Title[/h2]', $this->composer->markdownToBBCode('## Title'));
     }
 
     public function testMarkdownHeading3(): void {
         $this->assertSame('[h3]Sub[/h3]', $this->composer->markdownToBBCode('### Sub'));
+    }
+
+    public function testMarkdownFencedCodeBlock(): void {
+        $md = "```php\necho 'hello';\n```";
+        $this->assertSame("[code]echo 'hello';[/code]", $this->composer->markdownToBBCode($md));
+    }
+
+    public function testMarkdownBlockquote(): void {
+        $md = "> A wisdom quote";
+        $this->assertSame("[quote]\nA wisdom quote\n[/quote]", trim($this->composer->markdownToBBCode($md)));
+    }
+
+    public function testMarkdownHorizontalRule(): void {
+        $this->assertSame("[hr]", $this->composer->markdownToBBCode('---'));
+        $this->assertSame("[hr]", $this->composer->markdownToBBCode('***'));
     }
 
     public function testMarkdownLink(): void {

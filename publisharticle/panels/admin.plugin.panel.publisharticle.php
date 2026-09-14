@@ -39,9 +39,11 @@ if (class_exists('AdminPanelAction')) {
 
 			// Helper for the template: pre-selected frequency option
 			$freq = $options['import_frequency'];
+			$is_cron = ($freq !== 'manual' && $freq !== 'every_page_load');
 			$this->smarty->assign('is_manual', $freq === 'manual');
 			$this->smarty->assign('is_every_page_load', $freq === 'every_page_load');
-			$this->smarty->assign('is_cron', $freq !== 'manual' && $freq !== 'every_page_load');
+			$this->smarty->assign('is_cron', $is_cron);
+			$this->smarty->assign('cron_schedule', $is_cron ? $freq : '0 * * * *');
 		}
 
 		function onsubmit($data = null) {
@@ -60,7 +62,12 @@ if (class_exists('AdminPanelAction')) {
 				// Frequency: 'manual', 'every_page_load', or a custom cron expression
 				$freq = isset($_POST['import_frequency']) ? (string) $_POST['import_frequency'] : 'every_page_load';
 				if ($freq === 'custom') {
-					$freq = isset($_POST['cron_schedule']) ? trim((string) $_POST['cron_schedule']) : '0 * * * *';
+					$cron = isset($_POST['cron_schedule']) ? trim((string) $_POST['cron_schedule']) : '0 * * * *';
+					if (function_exists('publisharticle_valid_cron') && !publisharticle_valid_cron($cron)) {
+						$this->smarty->assign('success', -1);
+						return 2;
+					}
+					$freq = $cron;
 				}
 				$options['import_frequency'] = $freq;
 

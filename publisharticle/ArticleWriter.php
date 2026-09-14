@@ -1,5 +1,7 @@
 <?php
 
+require_once 'ArticleParser.php';
+
 /**
  * ArticleWriter — logica di SALVATAGGIO.
  *
@@ -104,7 +106,8 @@ class ArticleWriter {
     }
 
     /**
-     * Saves a complete entry: writes the .txt file plus the view counter sidecar.
+     * Saves a complete entry: writes the .txt file plus the view counter sidecar,
+     * and updates the FlatPress index if running inside FlatPress.
      *
      * @param string $id Entry ID
      * @param string $content Serialized entry string
@@ -114,7 +117,11 @@ class ArticleWriter {
         if (!$this->writeEntryFile($id, $content)) {
             return false;
         }
-        return $this->writeViewCounter($id, 0);
+        if (!$this->writeViewCounter($id, 0)) {
+            return false;
+        }
+        $this->updateIndex($id, $content);
+        return true;
     }
 
     /**
@@ -201,7 +208,44 @@ class ArticleWriter {
             return false;
         }
 
+        $this->updateIndex($id, $content);
+
         @unlink($pending['file']);
+        return true;
+    }
+
+    /**
+     * Updates the FlatPress search and category B+Tree index if running
+     * inside an active FlatPress environment.
+     *
+     * @param string $id Entry ID
+     * @param string $content Serialized entry string
+     * @return bool True if index was updated or not in FlatPress, false on failure
+     */
+    public function updateIndex($id, $content) {
+        if (!function_exists('entry_init')) {
+            return true; // Not running in FlatPress environment (e.g. standalone/tests)
+        }
+
+        $parser = new ArticleParser();
+        $entry = $parser->parseEntryString($content);
+
+        // FlatPress expects categories as an array of IDs
+        if (isset($entry['categories']) && is_string($entry['categories'])) {
+            $entry['categories'] = array_filter(array_map('trim', explode(',', $entry['categories'])), 'strlen');
+        } elseif (!isset($entry['categories']) || !is_array($entry['categories'])) {
+            $entry['categories'] = [];
+        }
+
+        $index = & entry_init();
+        if ($index && method_exists($index, 'add')) {
+            $ok = $index->add($id, $entry);
+            if (function_exists('do_action')) {
+                do_action('publish_post', $id, $entry);
+            }
+            return $ok !== false;
+        }
+
         return true;
     }
 }

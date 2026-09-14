@@ -1,4 +1,6 @@
 <?php
+date_default_timezone_set('UTC');
+
 /**
  * PHPUnit bootstrap for Publish Article plugin tests.
  *
@@ -39,7 +41,8 @@ if (!function_exists('plugin_saveoptions')) {
 }
 if (!function_exists('plugin_getdir')) {
     function plugin_getdir($plugin) {
-        return $srcDir;
+        global $srcDir;
+        return rtrim($srcDir, '/\\') . '/';
     }
 }
 if (!function_exists('add_action')) {

@@ -72,12 +72,28 @@ class ArticleComposer {
     public function markdownToBBCode($markdown) {
         $text = $markdown;
 
-        // Headers: ## Title -> [h2]Title[/h2]
+        // Fenced code blocks: ```lang ... ``` -> [code]...[/code]
+        $text = preg_replace('/```(?:[a-zA-Z0-9_-]+)?\r?\n(.*?)\r?\n```/s', '[code]$1[/code]', $text);
+
+        // Headers: # Title -> [h2]Title[/h2], ## -> [h2], etc.
         $text = preg_replace('/^######\s+(.+)$/m', '[h6]$1[/h6]', $text);
         $text = preg_replace('/^#####\s+(.+)$/m', '[h5]$1[/h5]', $text);
         $text = preg_replace('/^####\s+(.+)$/m', '[h4]$1[/h4]', $text);
         $text = preg_replace('/^###\s+(.+)$/m', '[h3]$1[/h3]', $text);
         $text = preg_replace('/^##\s+(.+)$/m', '[h2]$1[/h2]', $text);
+        $text = preg_replace('/^#\s+(.+)$/m', '[h2]$1[/h2]', $text);
+
+        // Blockquotes: > quote -> [quote]...[/quote]
+        $text = preg_replace_callback('/(?:^>[ \t]?(.*)$\r?\n?)+/m', function ($matches) {
+            $lines = [];
+            foreach (explode("\n", trim($matches[0])) as $l) {
+                $lines[] = preg_replace('/^>[ \t]?/', '', trim($l, "\r"));
+            }
+            return "[quote]\n" . implode("\n", $lines) . "\n[/quote]\n";
+        }, $text);
+
+        // Horizontal rules: --- or *** on an isolated line
+        $text = preg_replace('/^(?:---|\*\*\*)\s*$/m', '[hr]', $text);
 
         // Bold: **text** or __text__ -> [b]text[/b]
         $text = preg_replace('/\*\*(.+?)\*\*/', '[b]$1[/b]', $text);

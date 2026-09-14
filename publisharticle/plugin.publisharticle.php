@@ -83,7 +83,7 @@ function publisharticle_should_import($options) {
  *   5        exact value
  *   1,3,5    list of values
  *   1-5      range
- *   */15     step over the whole range
+ *   * /15    step over the whole range
  *   1-30/5   step over a range
  * Names are accepted for month (jan-dec) and day-of-week (sun-sat).
  *
@@ -132,7 +132,7 @@ function publisharticle_cron_matches($expr, $timestamp = null) {
 /**
  * Checks a single cron field against a value.
  *
- * @param string $field Cron field (e.g. "*/15", "1-5", "mon,fri")
+ * @param string $field Cron field (e.g. "* /15", "1-5", "mon,fri")
  * @param int $value Current value
  * @param int $index Field index (0=minute ... 4=day-of-week)
  * @param array $names Name maps for month/day-of-week
@@ -175,6 +175,9 @@ function publisharticle_cron_field_matches($field, $value, $index, $names) {
 		// Resolve names (month / day-of-week)
 		$resolve = function ($token) use ($names, $index) {
 			$token = strtolower(trim($token));
+			if ($index === 4 && $token === '7') {
+				return 0; // standard cron treats 7 as Sunday
+			}
 			if (isset($names[$index][$token])) {
 				return $names[$index][$token];
 			}
@@ -237,6 +240,84 @@ function publisharticle_cron_in_range($value, $from, $to, $step) {
 		return true;
 	}
 	return (($value - $from) % $step) === 0;
+}
+
+/**
+ * Validates a 5-field cron expression (minute hour day-of-month month day-of-week).
+ *
+ * @param string $expr Cron expression to validate
+ * @return bool True if valid, false otherwise
+ */
+function publisharticle_valid_cron($expr) {
+	if (!is_string($expr) || trim($expr) === '') {
+		return false;
+	}
+
+	$fields = preg_split('/\s+/', trim($expr));
+	if (count($fields) !== 5) {
+		return false;
+	}
+
+	$ranges = array(
+		array(0, 59),
+		array(0, 23),
+		array(1, 31),
+		array(1, 12),
+		array(0, 7),
+	);
+
+	$names = array(
+		3 => array('jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'),
+		4 => array('sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'),
+	);
+
+	foreach ($fields as $index => $field) {
+		$min = $ranges[$index][0];
+		$max = $ranges[$index][1];
+
+		foreach (explode(',', $field) as $part) {
+			$part = trim($part);
+			if ($part === '') {
+				return false;
+			}
+
+			if (strpos($part, '/') !== false) {
+				list($base, $step) = explode('/', $part, 2);
+				if (!ctype_digit($step) || (int) $step < 1) {
+					return false;
+				}
+			} else {
+				$base = $part;
+			}
+
+			if ($base === '*' || $base === '?') {
+				continue;
+			}
+
+			if (strpos($base, '-') !== false) {
+				list($from, $to) = explode('-', $base, 2);
+				$tokens = array($from, $to);
+			} else {
+				$tokens = array($base);
+			}
+
+			foreach ($tokens as $token) {
+				$token = strtolower(trim($token));
+				if (isset($names[$index]) && in_array($token, $names[$index])) {
+					continue;
+				}
+				if (!ctype_digit($token)) {
+					return false;
+				}
+				$num = (int) $token;
+				if ($num < $min || $num > $max) {
+					return false;
+				}
+			}
+		}
+	}
+
+	return true;
 }
 
 /**

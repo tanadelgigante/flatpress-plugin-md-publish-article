@@ -116,3 +116,36 @@ jobs:
           files: |
             publisharticle-${{ github.ref_name }}.zip
           generate_release_notes: true
+
+      - name: Bump version to next SNAPSHOT
+        run: |
+          set -euo pipefail
+
+          # The tag push leaves us on a detached HEAD: switch to the default branch
+          BRANCH="${{ github.event.repository.default_branch }}"
+          if [ -z "$BRANCH" ]; then
+            echo "::error::Cannot determine the repository default branch" >&2
+            exit 1
+          fi
+          git fetch origin
+          git checkout "$BRANCH"
+          git pull --ff-only origin "$BRANCH"
+
+          # Read current version, e.g. "0.0.1-SNAPSHOT"
+          CURRENT="$(tr -d '[:space:]' < version.ini)"
+          BASE="${CURRENT%-SNAPSHOT}"
+          MAJOR="${BASE%%.*}"; REST="${BASE#*.}"
+          MINOR="${REST%%.*}"; PATCH="${REST#*.}"
+          NEXT="$(printf '%s.%s.%s-SNAPSHOT' "$MAJOR" "$MINOR" "$((PATCH + 1))")"
+          printf '%s\n' "$NEXT" > version.ini
+          echo "Bumped version.ini: $CURRENT -> $NEXT"
+
+          git config user.name "CI bot"
+          git config user.email "ci-bot@localhost"
+          git add version.ini
+          if git diff --cached --quiet; then
+            echo "version.ini is already up to date ($NEXT); nothing to commit"
+            exit 0
+          fi
+          git commit -m "Bump version to $NEXT after release $GITHUB_REF_NAME"
+          git push origin "$BRANCH"
