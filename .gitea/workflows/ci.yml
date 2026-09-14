@@ -144,7 +144,7 @@ jobs:
         env:
           GITEA_DUNGEONPAT: ${{ secrets.DUNGEONPAT }}
         run: |
-          echo "token length: ${#GITEA_DUNGEONPAT}"
+          echo "token length: ${GITEA_DUNGEONPAT}"
           set -euo pipefail
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
