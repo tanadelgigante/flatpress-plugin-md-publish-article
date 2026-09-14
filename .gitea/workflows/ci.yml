@@ -28,7 +28,7 @@ jobs:
       # actions run on the runner so they inherit its network/DNS, which can
       # resolve repo.kenshiro.lab.tana.
       - name: Install tooling (Node, PHP, zip)
-        run: apk add --no-cache nodejs npm php-cli zip
+        run: apk add --no-cache nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv zip
 
       # Trust the Gitea CA so git over HTTPS verifies against the internal CA
       - name: Trust the Gitea CA
@@ -67,7 +67,7 @@ jobs:
     runs-on: lab
     steps:
       - name: Install tooling (Node, PHP, zip, curl)
-        run: apk add --no-cache nodejs npm php-cli php-openssl php-phar php-mbstring php-iconv curl zip
+        run: apk add --no-cache nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-curl curl zip
 
       - name: Trust the Gitea CA
         env:
