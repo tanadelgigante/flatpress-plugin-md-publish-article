@@ -23,23 +23,35 @@ jobs:
   # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
   lint:
     runs-on: lab
-    container:
-      image: php:8.2-cli
     steps:
-      # Node.js is required to run JS-based actions (checkout, etc.); git lets
-      # checkout clone over HTTPS. The Gitea CA (secret DUNGEONCACERT) is added
-      # to the container trust store so TLS verification succeeds.
-      - name: Install tooling and trust the Gitea CA
+      # Node is needed by the JS actions (checkout etc.). No container: the
+      # actions run on the runner so they inherit its network/DNS, which can
+      # resolve repo.kenshiro.lab.tana.
+      - name: Install tooling (Node, PHP, zip)
+        run: |
+          set -euo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+          fi
+          if ! command -v php >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y php-cli
+          fi
+          command -v zip >/dev/null 2>&1 || apt-get install -y zip
+
+      # Trust the Gitea CA so git over HTTPS verifies against the internal CA
+      - name: Trust the Gitea CA
         env:
           DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends nodejs npm zip git ca-certificates
+          set -euo pipefail
           if [ -n "$DUNGEONCACERT" ]; then
+            apt-get install -y ca-certificates
             printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --system http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
           fi
 
       - uses: actions/checkout@v4
@@ -63,20 +75,31 @@ jobs:
   # ── Job 2: PHPUnit unit tests ────────────────────────────────────
   test:
     runs-on: lab
-    container:
-      image: php:8.2-cli
     steps:
-      - name: Install tooling and trust the Gitea CA
+      - name: Install tooling (Node, PHP, zip)
+        run: |
+          set -euo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+          fi
+          if ! command -v php >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y php-cli
+          fi
+          command -v zip >/dev/null 2>&1 || apt-get install -y zip
+
+      - name: Trust the Gitea CA
         env:
           DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends nodejs npm zip git ca-certificates
+          set -euo pipefail
           if [ -n "$DUNGEONCACERT" ]; then
+            apt-get install -y ca-certificates
             printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --system http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
           fi
 
       - uses: actions/checkout@v4
@@ -102,20 +125,27 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
     needs: [lint, test]
     runs-on: lab
-    container:
-      image: php:8.2-cli
     steps:
-      - name: Install tooling and trust the Gitea CA
+      - name: Install tooling (Node, zip)
+        run: |
+          set -euo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+          fi
+          command -v zip >/dev/null 2>&1 || apt-get install -y zip
+
+      - name: Trust the Gitea CA
         env:
           DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends nodejs npm zip git ca-certificates
+          set -euo pipefail
           if [ -n "$DUNGEONCACERT" ]; then
+            apt-get install -y ca-certificates
             printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --system http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
           fi
 
       - uses: actions/checkout@v4
@@ -149,22 +179,30 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release')
     needs: [lint, test]
     runs-on: lab
-    container:
-      image: php:8.2-cli
     permissions:
       contents: write
     steps:
-      - name: Install tooling and trust the Gitea CA
+      - name: Install tooling (Node, zip, git)
+        run: |
+          set -euo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+          fi
+          command -v zip >/dev/null 2>&1 || apt-get install -y zip
+          command -v git >/dev/null 2>&1 || apt-get install -y git
+
+      - name: Trust the Gitea CA
         env:
           DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends nodejs npm zip git ca-certificates
+          set -euo pipefail
           if [ -n "$DUNGEONCACERT" ]; then
+            apt-get install -y ca-certificates
             printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --system http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
           fi
 
       - uses: actions/checkout@v4
