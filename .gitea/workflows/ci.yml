@@ -213,6 +213,7 @@ jobs:
         run: |
           set -euo pipefail
           LAN_GATEWAY="${{ vars.RUNNER_LAN_GATEWAY }}"
+          LAN_IP=""
 
           if [ -n "$LAN_GATEWAY" ]; then
             LAN_IP=$(docker run --rm --network host busybox \
