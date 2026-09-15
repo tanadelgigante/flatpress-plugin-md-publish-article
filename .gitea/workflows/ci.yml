@@ -262,12 +262,11 @@ jobs:
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
 
-          # Tell curl inside the container to skip SSL verification.
-          # curl reads $CURL_HOME/.curlrc first, then $HOME/.curlrc —
-          # we set CURL_HOME=/ and mount the file at both locations so
-          # it works no matter which user the entrypoint runs as.
-          CURLRC=/tmp/testbed-curlrc
-          printf '%s\n' 'insecure' > "$CURLRC"
+          # The runner already trusts the Gitea CA (installed in the
+          # "Trust the Gitea CA" step above).  Mount the runner's
+          # updated cert bundle into the container so curl (and PHP)
+          # can verify the internal Gitea certificate.
+          CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
@@ -277,9 +276,7 @@ jobs:
                  --dns 192.168.188.110 \
                  --dns 192.168.188.105 \
                  --add-host repo.kenshiro.lab.tana:192.168.188.110 \
-                 -v "$CURLRC:/.curlrc:ro" \
-                 -v "$CURLRC:/root/.curlrc:ro" \
-                 -e CURL_HOME=/ \
+                 -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
