@@ -207,47 +207,10 @@ jobs:
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
 
-      # Discover the host's LAN IP by listing every IP on the host and
-      # keeping only the one that falls inside LAN_RANGE (e.g. 192.168.188.0/24).
-      - name: Discover host LAN IP
-        id: lan_ip
-        run: |
-          set -euo pipefail
-          LAN_RANGE="${{ vars.TESTBED_LAN_RANGE }}"
-          LAN_IP=""
-
-          if [ -n "$LAN_RANGE" ]; then
-            NET=$(echo "$LAN_RANGE" | cut -d/ -f1)
-            PREFIX=$(echo "$LAN_RANGE" | cut -d/ -f2)
-
-            # Use --network host to see the REAL host interfaces,
-            # not the runner container's bridge network.
-            ALL_IPS=$(docker run --rm --network host alpine sh -c \
-              'ip -4 addr show' \
-              | awk '/inet /{print $2}' \
-              | sed 's/\/.*//' \
-              | grep -v '^127\.')
-
-            while IFS= read -r ip; do
-              [ -z "$ip" ] && continue
-              mask=$(( 0xFFFFFFFF << (32 - PREFIX) ))
-              ip_int=$(echo "$ip" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
-              net_int=$(echo "$NET" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
-              if [ "$(( ip_int & mask ))" -eq "$(( net_int & mask ))" ]; then
-                LAN_IP="$ip"
-                break
-              fi
-            done <<< "$ALL_IPS"
-          fi
-
-          # Fallback: bind on all interfaces
-          if [ -z "$LAN_IP" ]; then
-            LAN_IP="0.0.0.0"
-            echo "::warning::Could not find an IP in ${LAN_RANGE:-LAN_RANGE not set}, binding on 0.0.0.0"
-          fi
-
-          echo "lan_ip=$LAN_IP" >> "$GITHUB_OUTPUT"
-          echo "Host IP for testbed: $LAN_IP"
+      # Get the runner hostname so the testbed URL uses a resolvable name
+      - name: Get runner hostname
+        id: runner
+        run: echo "hostname=$(hostname)" >> "$GITHUB_OUTPUT"
 
       # Let Docker pick a free host port (two colons = random port),
       # then discover it with "docker port".  Retries on race conditions.
@@ -258,7 +221,7 @@ jobs:
           PLUGIN_URL: ${{ steps.resolve_plugin.outputs.plugin_url }}
           PLUGIN_AUTH_HEADER: "Authorization: token ${{ secrets.DUNGEONPAT }}"
           FLATPRESS_URL: ${{ vars.FLATPRESS_STABLE_URL }}
-          LAN_IP: ${{ steps.lan_ip.outputs.lan_ip }}
+          HOSTNAME: ${{ steps.runner.outputs.hostname }}
         run: |
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
@@ -282,7 +245,7 @@ jobs:
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
-                 -p "${LAN_IP}::80" \
+                 -p "0.0.0.0::80" \
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
 
@@ -301,7 +264,7 @@ jobs:
                 continue
               fi
 
-              echo "Ambiente di collaudo: http://${LAN_IP}:${PORT}/" \
+              echo "Ambiente di collaudo: http://${HOSTNAME}:${PORT}/" \
                    | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
 
