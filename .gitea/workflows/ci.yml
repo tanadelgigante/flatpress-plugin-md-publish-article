@@ -252,6 +252,11 @@ jobs:
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
 
+          # Write the Gitea CA cert to a host file so we can mount it
+          # inside the container, where curl needs it for HTTPS.
+          CA_CERT="/tmp/gitea-ca.crt"
+          printf '%s\n' "${{ secrets.DUNGEONCACERT }}" > "$CA_CERT"
+
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
             if docker run -d \
@@ -260,9 +265,11 @@ jobs:
                  --dns 192.168.188.110 \
                  --dns 192.168.188.105 \
                  --add-host repo.kenshiro.lab.tana:192.168.188.110 \
+                 -v "$CA_CERT:/usr/local/share/ca-certificates/gitea-ca.crt:ro" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
+                 -e CURL_CA_BUNDLE=/usr/local/share/ca-certificates/gitea-ca.crt \
                  -p "${LAN_IP}::80" \
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
