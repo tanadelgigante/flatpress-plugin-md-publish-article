@@ -35,16 +35,12 @@ if (class_exists('AdminPanelAction')) {
 
 			$this->smarty->assign('msgs', array());
 
-			// Default publication date
 			$this->smarty->assign(
 				'pub_date',
 				date('Y-m-d\TH:i')
 			);
 
-			// Pending imports from folder
 			$this->_assignPending();
-
-			// Recent import log
 			$this->_assignRecent();
 		}
 
@@ -55,9 +51,6 @@ if (class_exists('AdminPanelAction')) {
 
 			$this->smarty->assign('msgs', array());
 
-			/**
-			 * Single-file publish / draft via upload.
-			 */
 			if (
 				isset($_POST['publisharticle-publish']) ||
 				isset($_POST['publisharticle-draft'])
@@ -65,14 +58,10 @@ if (class_exists('AdminPanelAction')) {
 				$this->_handleUpload();
 			}
 
-			/**
-			 * Bulk import from folder.
-			 */
 			if (isset($_POST['publisharticle-import-now'])) {
 				$this->_handleBulkImport();
 			}
 
-			// Refresh data
 			$this->_assignPending();
 			$this->_assignRecent();
 			$this->smarty->assign(
@@ -87,10 +76,16 @@ if (class_exists('AdminPanelAction')) {
 
 		/**
 		 * Handle uploaded Markdown + images, publish or draft.
+		 *
+		 * Images are saved with their ORIGINAL name (sanitized)
+		 * so that Markdown references like (plugin.png) work.
+		 * We also rewrite any reference in the Markdown body
+		 * to add the images/ prefix when needed.
 		 */
 		private function _handleUpload() {
 
-			// ── Validate MD file upload ──
+			// ── Validate MD file ──
+
 			if (
 				!isset($_FILES['md_file']) ||
 				$_FILES['md_file']['error'] !== UPLOAD_ERR_OK
@@ -99,10 +94,9 @@ if (class_exists('AdminPanelAction')) {
 				return;
 			}
 
-			$tmpMd = $_FILES['md_file']['tmp_name'];
+			$tmpMd    = $_FILES['md_file']['tmp_name'];
 			$origName = $_FILES['md_file']['name'];
-
-			$ext = strtolower(
+			$ext      = strtolower(
 				pathinfo($origName, PATHINFO_EXTENSION)
 			);
 
@@ -117,63 +111,93 @@ if (class_exists('AdminPanelAction')) {
 				return;
 			}
 
-			// ── Status ──
-			$isDraft = isset($_POST['publisharticle-draft']);
-			$status = $isDraft ? 'draft' : 'publish';
+			// ── Status & date ──
 
-			// ── Date override ──
+			$isDraft = isset($_POST['publisharticle-draft']);
+			$status  = $isDraft ? 'draft' : 'publish';
 			$pubDate = '';
+
 			if (
 				isset($_POST['publish_now']) &&
 				$_POST['publish_now'] === 'on'
 			) {
-				// Use now
-			} elseif (
-				!empty($_POST['pub_date'])
-			) {
+				// publish now → leave $pubDate empty
+			} elseif (!empty($_POST['pub_date'])) {
 				$pubDate = $_POST['pub_date'];
 			}
 
-			// ── Handle image uploads ──
-			$importedImages = array();
+			// ── Upload images (original name, sanitized) ──
+
+			$imageMap = array();
 
 			if (
 				isset($_FILES['images']) &&
 				!empty($_FILES['images']['name'][0])
 			) {
+				$contentDir = CONTENT_DIR . 'content';
+				$imgDir     = $contentDir . '/images';
 
-				$imgUploader = new ImageUploader();
+				if (!is_dir($imgDir)) {
+					mkdir($imgDir, 0755, true);
+				}
+
 				$count = count($_FILES['images']['name']);
 
 				for ($i = 0; $i < $count; $i++) {
 
 					if (
-						$_FILES['images']['error'][$i] !== UPLOAD_ERR_OK
+						$_FILES['images']['error'][$i]
+						!== UPLOAD_ERR_OK
 					) {
 						continue;
 					}
 
-					$rel = $imgUploader->upload(
-						array(
-							'name'     => $_FILES['images']['name'][$i],
-							'type'     => $_FILES['images']['type'][$i],
-							'tmp_name' => $_FILES['images']['tmp_name'][$i],
-							'error'    => $_FILES['images']['error'][$i],
-							'size'     => $_FILES['images']['size'][$i],
-						),
-						$baseName
+					$rawName  = basename(
+						$_FILES['images']['name'][$i]
 					);
+					$safeName = preg_replace(
+						'/[^a-zA-Z0-9_.\-]/',
+						'_',
+						$rawName
+					);
+					$dest = $imgDir . '/' . $safeName;
 
-					if ($rel !== false) {
-						$importedImages[] = $rel;
+					if (file_exists($dest)) {
+						$safeName = 'img_'
+							. date('Ymd_His')
+							. '_' . $safeName;
+						$dest = $imgDir . '/' . $safeName;
+					}
+
+					if (
+						move_uploaded_file(
+							$_FILES['images']['tmp_name'][$i],
+							$dest
+						)
+					) {
+						$imageMap[$rawName] = 'images/' . $safeName;
 					}
 				}
 			}
 
-			// ── Build frontmatter + content ──
-			$overrides = array(
-				'status' => $status,
-			);
+			// ── Fix Markdown image references ──
+			// (plugin.png) → (images/plugin.png)
+			// (plugin.png width=500) → (images/plugin.png width=500)
+
+			foreach ($imageMap as $orig => $rel) {
+
+				$escaped = preg_quote($orig, '/');
+
+				$mdContent = preg_replace(
+					'/\(' . $escaped . '(\s+[^)]*)?\)/i',
+					'(' . $rel . '$1)',
+					$mdContent
+				);
+			}
+
+			// ── Inject status / date into frontmatter ──
+
+			$overrides = array('status' => $status);
 
 			if ($pubDate !== '') {
 				$dt = str_replace('T', ' ', $pubDate) . ':00';
@@ -185,28 +209,11 @@ if (class_exists('AdminPanelAction')) {
 				$overrides
 			);
 
-			// Prepend image references to body if any
-			if (!empty($importedImages)) {
-				$imgTags = '';
-				foreach ($importedImages as $img) {
-					$imgTags .= '![image](' . $img . ")\n";
-				}
-				$mdContent .= "\n" . $imgTags;
-			}
+			// ── Process ──
 
-			// ── Process article ──
-			$options = plugin_getoptions('publisharticle');
-			if (!is_array($options)) {
-				$options = array();
-			}
-
-			$baseName = pathinfo(
-				$origName, PATHINFO_FILENAME
-			);
-
+			$baseName = pathinfo($origName, PATHINFO_FILENAME);
 			$processor = new ArticleProcessor();
-
-			$result = $processor->process(
+			$result    = $processor->process(
 				$mdContent,
 				array(),
 				$baseName
@@ -221,7 +228,7 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		/**
-		 * Bulk-import all pending files from the import folder.
+		 * Bulk-import from the configured import folder.
 		 */
 		private function _handleBulkImport() {
 
@@ -244,7 +251,6 @@ if (class_exists('AdminPanelAction')) {
 			);
 
 			$results = $importer->importAll();
-
 			$ok   = 0;
 			$fail = 0;
 
@@ -266,10 +272,8 @@ if (class_exists('AdminPanelAction')) {
 		/**
 		 * Inject overrides into the Markdown frontmatter.
 		 */
-		private function _injectOverrides(
-			$content,
-			$overrides
-		) {
+		private function _injectOverrides($content, $overrides) {
+
 			$inject = array();
 
 			if (!empty($overrides['status'])) {
@@ -284,22 +288,19 @@ if (class_exists('AdminPanelAction')) {
 				return $content;
 			}
 
-			if (
-				preg_match(
-					'/^(---\s*\n.*?\n---\s*\n?)/s',
-					$content,
-					$m
-				)
-			) {
+			$re = '/^(---\s*\n.*?\n---\s*\n?)/s';
+
+			if (preg_match($re, $content, $m)) {
+
 				$frontmatter = $m[1];
+
 				foreach ($inject as $line) {
 					list($key) = explode(':', $line, 2);
-					if (
-						!preg_match(
-							'/^' . preg_quote($key, '/') . '\s*:/mi',
-							$frontmatter
-						)
-					) {
+					$pat = '/^'
+						. preg_quote($key, '/')
+						. '\s*:/mi';
+
+					if (!preg_match($pat, $frontmatter)) {
 						$frontmatter = preg_replace(
 							'/\n---\s*$/s',
 							"\n" . $line . "\n---",
@@ -307,6 +308,7 @@ if (class_exists('AdminPanelAction')) {
 						);
 					}
 				}
+
 				return $frontmatter
 					. substr($content, strlen($m[1]));
 			}
@@ -318,7 +320,7 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		/**
-		 * Assign pending file count for the folder.
+		 * Assign pending file count.
 		 */
 		private function _assignPending() {
 
@@ -351,13 +353,9 @@ if (class_exists('AdminPanelAction')) {
 
 				$this->smarty->assign(
 					'pending_count',
-					is_array($pending)
-						? count($pending)
-						: 0
+					is_array($pending) ? count($pending) : 0
 				);
-
 			} else {
-
 				$this->smarty->assign('pending_count', 0);
 			}
 		}
@@ -379,10 +377,7 @@ if (class_exists('AdminPanelAction')) {
 		}
 
 		/**
-		 * Scan done/failed subdirs for recently imported files.
-		 *
-		 * @param array $options
-		 * @return array
+		 * Scan done/failed subdirs for recent imports.
 		 */
 		private function _getRecentImports($options) {
 
@@ -392,10 +387,7 @@ if (class_exists('AdminPanelAction')) {
 				? $options['import_folder']
 				: '';
 
-			if (
-				$importDir === '' ||
-				!is_dir($importDir)
-			) {
+			if ($importDir === '' || !is_dir($importDir)) {
 				return $imports;
 			}
 
@@ -424,13 +416,9 @@ if (class_exists('AdminPanelAction')) {
 					continue;
 				}
 
-				usort(
-					$files,
-					function ($a, $b) {
-						return filemtime($b)
-							- filemtime($a);
-					}
-				);
+				usort($files, function ($a, $b) {
+					return filemtime($b) - filemtime($a);
+				});
 
 				$files = array_slice($files, 0, 20);
 
@@ -440,10 +428,8 @@ if (class_exists('AdminPanelAction')) {
 						continue;
 					}
 
-					$base = basename($f);
-					$success = (
-						strpos($dir, $doneSubdir) !== false
-					);
+					$base    = basename($f);
+					$success = (strpos($dir, $doneSubdir) !== false);
 
 					$note = '';
 					$noteFile = $f . '.note';
@@ -467,9 +453,5 @@ if (class_exists('AdminPanelAction')) {
 		}
 	}
 
-	admin_addpanelaction(
-		'plugin',
-		'publisharticle',
-		true
-	);
+	admin_addpanelaction('plugin', 'publisharticle', true);
 }
