@@ -217,27 +217,26 @@ jobs:
           LAN_IP=""
 
           if [ -n "$LAN_RANGE" ]; then
-            # Extract network + prefix from CIDR  (e.g. 192.168.188.0/24 → 192.168.188.0 24)
             NET=$(echo "$LAN_RANGE" | cut -d/ -f1)
             PREFIX=$(echo "$LAN_RANGE" | cut -d/ -f2)
 
-            # List every IPv4 address assigned to the host via `ip addr`
-            ALL_IPS=$(docker run --rm --network host alpine \
-              sh -c 'ip -4 addr show' \
-              | grep -oP 'inet \K[0-9.]+' \
+            # List every non-loopback IPv4 on the host (no -P; busybox-safe)
+            ALL_IPS=$(ip -4 addr show \
+              | awk '/inet /{print $2}' \
+              | sed 's/\/.*//' \
               | grep -v '^127\.')
 
-            # Keep IPs whose first 4 octets are in the same subnet
-            LAN_IP=$(echo "$ALL_IPS" | while read -r ip; do
-              # Convert to integer and mask with prefix
+            # Keep the first IP that falls inside the subnet
+            while IFS= read -r ip; do
+              [ -z "$ip" ] && continue
               mask=$(( 0xFFFFFFFF << (32 - PREFIX) ))
               ip_int=$(echo "$ip" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
               net_int=$(echo "$NET" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
               if [ "$(( ip_int & mask ))" -eq "$(( net_int & mask ))" ]; then
-                echo "$ip"
+                LAN_IP="$ip"
                 break
               fi
-            done)
+            done <<< "$ALL_IPS"
           fi
 
           # Fallback: bind on all interfaces
@@ -288,14 +287,8 @@ jobs:
               sleep 3
 
               # Discover the randomly-assigned host port
-              PORT=$(docker port "$CONTAINER" 80/tcp 2>/dev/null \
-                     | head -1 | cut -d: -f2)
-
-              # Fallback: use docker inspect if docker port is empty
-              if [ -z "$PORT" ]; then
-                PORT=$(docker inspect "$CONTAINER" \
-                  --format '{{range .NetworkSettings.Networks}}{{range .Ports}}{{.HostPort}}{{end}}{{end}}' 2>/dev/null)
-              fi
+              PORT=$(docker inspect "$CONTAINER" \
+                --format '{{range $k, $v := .NetworkSettings.Ports}}{{if eq $k "80/tcp"}}{{(index $v 0).HostPort}}{{end}}{{end}}' 2>/dev/null)
 
               if [ -z "$PORT" ]; then
                 echo "::warning::Container started but port mapping not ready (attempt $i)"
