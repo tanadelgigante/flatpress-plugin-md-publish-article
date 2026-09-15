@@ -271,7 +271,7 @@ jobs:
 
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
-            if docker run -d \
+            if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
                  --restart unless-stopped \
                  --dns 192.168.188.120 \
