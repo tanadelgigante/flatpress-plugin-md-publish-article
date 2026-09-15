@@ -200,7 +200,8 @@ jobs:
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${{ github.run_id }}"
-          PLUGIN_URL="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ARCHIVE}"
+          ZIP="${{ needs.package.outputs.archive_name }}"
+          PLUGIN_URL="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ZIP}"
 
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
@@ -262,15 +263,23 @@ jobs:
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
 
-              # Wait a beat for the port mapping to settle
-              sleep 1
+              # Wait for the container to start and port mapping to settle
+              sleep 3
 
               # Discover the randomly-assigned host port
               PORT=$(docker port "$CONTAINER" 80/tcp 2>/dev/null \
                      | head -1 | cut -d: -f2)
 
+              # Fallback: use docker inspect if docker port is empty
+              if [ -z "$PORT" ]; then
+                PORT=$(docker inspect "$CONTAINER" \
+                  --format '{{range .NetworkSettings.Networks}}{{range .Ports}}{{.HostPort}}{{end}}{{end}}' 2>/dev/null)
+              fi
+
               if [ -z "$PORT" ]; then
                 echo "::warning::Container started but port mapping not ready (attempt $i)"
+                echo "Container logs:"
+                docker logs "$CONTAINER" 2>&1 | tail -20
                 docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
                 continue
               fi
