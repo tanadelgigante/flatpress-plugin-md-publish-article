@@ -2,6 +2,7 @@ name: CI
 
 env:
   TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
+  TESTBED_LAN_RANGE: "${{ vars.LAN_RANGE }}"
 
 on:
   push:
@@ -206,33 +207,43 @@ jobs:
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
 
-      # Discover the host's LAN IP so the testbed is reachable from the
-      # local network.  Falls back to the host's default route if
-      # RUNNER_LAN_GATEWAY is not set.
+      # Discover the host's LAN IP by listing every IP on the host and
+      # keeping only the one that falls inside LAN_RANGE (e.g. 192.168.188.0/24).
       - name: Discover host LAN IP
         id: lan_ip
         run: |
           set -euo pipefail
-          LAN_GATEWAY="${{ vars.RUNNER_LAN_GATEWAY }}"
+          LAN_RANGE="${{ vars.TESTBED_LAN_RANGE }}"
           LAN_IP=""
 
-          if [ -n "$LAN_GATEWAY" ]; then
-            LAN_IP=$(docker run --rm --network host busybox \
-              ip route get "$LAN_GATEWAY" 2>/dev/null \
-              | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')
+          if [ -n "$LAN_RANGE" ]; then
+            # Extract network + prefix from CIDR  (e.g. 192.168.188.0/24 → 192.168.188.0 24)
+            NET=$(echo "$LAN_RANGE" | cut -d/ -f1)
+            PREFIX=$(echo "$LAN_RANGE" | cut -d/ -f2)
+
+            # List every IPv4 address assigned to the host via `ip addr`
+            ALL_IPS=$(docker run --rm --network host alpine \
+              sh -c 'ip -4 addr show' \
+              | grep -oP 'inet \K[0-9.]+' \
+              | grep -v '^127\.')
+
+            # Keep IPs whose first 4 octets are in the same subnet
+            LAN_IP=$(echo "$ALL_IPS" | while read -r ip; do
+              # Convert to integer and mask with prefix
+              mask=$(( 0xFFFFFFFF << (32 - PREFIX) ))
+              ip_int=$(echo "$ip" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
+              net_int=$(echo "$NET" | awk -F. '{printf "%u", ($1<<24)+($2<<16)+($3<<8)+$4}')
+              if [ "$(( ip_int & mask ))" -eq "$(( net_int & mask ))" ]; then
+                echo "$ip"
+                break
+              fi
+            done)
           fi
 
-          # Fallback: use the host's default gateway
-          if [ -z "$LAN_IP" ] || [ "$LAN_IP" = "127.0.0.1" ]; then
-            LAN_IP=$(docker run --rm --network host busybox \
-              ip route 2>/dev/null \
-              | awk '/^default/{for(i=1;i<=NF;i++) if ($i=="via") print $(i+1); exit}')
-          fi
-
-          # Last resort: bind on all interfaces
-          if [ -z "$LAN_IP" ] || [ "$LAN_IP" = "127.0.0.1" ]; then
+          # Fallback: bind on all interfaces
+          if [ -z "$LAN_IP" ]; then
             LAN_IP="0.0.0.0"
-            echo "::warning::Could not discover LAN IP, binding on 0.0.0.0"
+            echo "::warning::Could not find an IP in ${LAN_RANGE:-LAN_RANGE not set}, binding on 0.0.0.0"
           fi
 
           echo "lan_ip=$LAN_IP" >> "$GITHUB_OUTPUT"
@@ -252,10 +263,10 @@ jobs:
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
 
-          # Write the Gitea CA cert to a host file so we can mount it
-          # inside the container, where curl needs it for HTTPS.
-          CA_CERT="/tmp/gitea-ca.crt"
-          printf '%s\n' "${{ secrets.DUNGEONCACERT }}" > "$CA_CERT"
+          # Inject a .curlrc that tells curl to skip SSL verification
+          # inside the container (the Gitea CA is not in the default store).
+          CURLRC=/tmp/testbed-curlrc
+          printf '%s\n' '--insecure' > "$CURLRC"
 
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
@@ -265,11 +276,10 @@ jobs:
                  --dns 192.168.188.110 \
                  --dns 192.168.188.105 \
                  --add-host repo.kenshiro.lab.tana:192.168.188.110 \
-                 -v "$CA_CERT:/usr/local/share/ca-certificates/gitea-ca.crt:ro" \
+                 -v "$CURLRC:/root/.curlrc:ro" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
-                 -e CURL_CA_BUNDLE=/usr/local/share/ca-certificates/gitea-ca.crt \
                  -p "${LAN_IP}::80" \
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
