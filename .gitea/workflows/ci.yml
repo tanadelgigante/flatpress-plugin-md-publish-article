@@ -1,5 +1,8 @@
 name: CI
 
+env:
+  TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
+
 on:
   push:
   pull_request:
@@ -197,8 +200,7 @@ jobs:
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${{ github.run_id }}"
-          ZIP_FILE="${{ needs.package.outputs.archive_name }}"
-          PLUGIN_URL="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ZIP_FILE}"
+          PLUGIN_URL="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ARCHIVE}"
 
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
@@ -232,7 +234,7 @@ jobs:
           find_free_port() {
             local p
             p=$(( (RANDOM % (PORT_MAX - PORT_MIN + 1)) + PORT_MIN ))
-            if ss -ltn | awk '{print $4}' | grep -q ":${p}\$"; then
+            if netstat -tln | awk '{print $4}' | grep -q ":${p}\$"; then
               return 1
             fi
             echo "$p"
@@ -247,7 +249,7 @@ jobs:
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
                  -p "${LAN_IP}:${PORT}:80" \
                  --name "flatpress-test-${{ github.run_id }}" \
-                 flatpress-testbed:latest 2>/tmp/docker_run_err; then
+                 "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
               echo "Ambiente di collaudo: http://${LAN_IP}:${PORT}/" | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
             elif grep -q "port is already allocated" /tmp/docker_run_err; then
