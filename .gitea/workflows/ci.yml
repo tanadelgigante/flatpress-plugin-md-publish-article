@@ -155,6 +155,116 @@ jobs:
             -o /dev/null -w "Package uploaded: HTTP %{http_code}\n"
           echo "UPLOADED_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
 
+  # ── Job 3.5: Spin up an ephemeral FlatPress testbed with the built plugin ──
+  # Runs after "package", using the artifact it just uploaded to the Gitea
+  # Package Registry (same run, same package version "build-<run_id>").
+  # NOTE: does NOT gate "release" — that job only needs [lint, test], so a
+  # failure here never blocks a release.
+  testbed:
+    needs: [package]
+    runs-on: lab
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      # docker-cli is needed to launch the testbed container and to run the
+      # throwaway --network host container for LAN IP discovery. Requires
+      # /var/run/docker.sock reachable from this runner's job containers on
+      # all 4 hosts.
+      - name: Install tooling (docker CLI, curl)
+        run: apk add --no-cache docker-cli curl
+
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            apk add --no-cache ca-certificates
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+          fi
+
+      # Locate the zip the "package" job just uploaded
+      - name: Resolve plugin package URL
+        id: resolve_plugin
+        env:
+          PKGTOKEN: ${{ secrets.DUNGEONPAT }}
+        run: |
+          set -euo pipefail
+          OWNER="${{ github.repository_owner }}"
+          PKG_NAME="publisharticle"
+          PKG_VERSION="build-${{ github.run_id }}"
+          PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
+
+          FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_BASE}/-/files")
+          ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
+            echo "API response: $FILES" >&2
+            exit 1
+          fi
+
+          echo "plugin_url=${PKG_BASE}/${ZIP_FILE}" >> "$GITHUB_OUTPUT"
+
+      # Ask the host's real network stack (not the job container's bridge
+      # interface) for the route to the LAN gateway, so we get the correct
+      # LAN IP of whichever of the 4 hosts ran this job — even if multi-homed
+      - name: Discover host LAN IP
+        id: lan_ip
+        run: |
+          set -euo pipefail
+          LAN_GATEWAY="${{ vars.RUNNER_LAN_GATEWAY }}"
+          LAN_IP=$(docker run --rm --network host busybox \
+            ip route get "$LAN_GATEWAY" | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')
+          echo "lan_ip=$LAN_IP" >> "$GITHUB_OUTPUT"
+
+      # Pick a free host port (with retry on the rare race), then launch the
+      # ephemeral testbed. --rm + --tmpfs makes it fully ephemeral: no state
+      # survives a docker stop
+      - name: Start ephemeral FlatPress testbed
+        env:
+          PLUGIN_URL: ${{ steps.resolve_plugin.outputs.plugin_url }}
+          PLUGIN_AUTH_HEADER: "Authorization: token ${{ secrets.DUNGEONPAT }}"
+          FLATPRESS_URL: ${{ vars.FLATPRESS_STABLE_URL }}
+          LAN_IP: ${{ steps.lan_ip.outputs.lan_ip }}
+        run: |
+          set -euo pipefail
+          PORT_MIN=20000
+          PORT_MAX=40000
+
+          find_free_port() {
+            local p
+            p=$(( (RANDOM % (PORT_MAX - PORT_MIN + 1)) + PORT_MIN ))
+            if ss -ltn | awk '{print $4}' | grep -q ":${p}\$"; then
+              return 1
+            fi
+            echo "$p"
+          }
+
+          for i in 1 2 3; do
+            PORT=$(find_free_port) || continue
+            if docker run -d --rm \
+                 --tmpfs /var/www/html:size=256m \
+                 -e FLATPRESS_URL="$FLATPRESS_URL" \
+                 -e PLUGIN_URL="$PLUGIN_URL" \
+                 -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
+                 -p "${LAN_IP}:${PORT}:80" \
+                 --name "flatpress-test-${{ github.run_id }}" \
+                 flatpress-testbed:latest 2>/tmp/docker_run_err; then
+              echo "Ambiente di collaudo: http://${LAN_IP}:${PORT}/" | tee -a "$GITHUB_STEP_SUMMARY"
+              exit 0
+            elif grep -q "port is already allocated" /tmp/docker_run_err; then
+              continue
+            else
+              cat /tmp/docker_run_err >&2
+              exit 1
+            fi
+          done
+
+          echo "::error::Could not find a free port after 3 attempts" >&2
+          exit 1
+
   # ── Job 4: Create Gitea Release ──────────────────────────────────
   # Triggered by a push tag v*, or manually (job=release) to reuse a tested artifact
   release:
