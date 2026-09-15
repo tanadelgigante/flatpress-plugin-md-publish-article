@@ -205,21 +205,41 @@ jobs:
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
 
-      # Ask the host's real network stack (not the job container's bridge
-      # interface) for the route to the LAN gateway, so we get the correct
-      # LAN IP of whichever of the 4 hosts ran this job — even if multi-homed
+      # Discover the host's LAN IP so the testbed is reachable from the
+      # local network.  Falls back to the host's default route if
+      # RUNNER_LAN_GATEWAY is not set.
       - name: Discover host LAN IP
         id: lan_ip
         run: |
           set -euo pipefail
           LAN_GATEWAY="${{ vars.RUNNER_LAN_GATEWAY }}"
-          LAN_IP=$(docker run --rm --network host busybox \
-            ip route get "$LAN_GATEWAY" | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')
-          echo "lan_ip=$LAN_IP" >> "$GITHUB_OUTPUT"
 
-      # Pick a free host port (with retry on the rare race), then launch the
-      # ephemeral testbed. --rm + --tmpfs makes it fully ephemeral: no state
-      # survives a docker stop
+          if [ -n "$LAN_GATEWAY" ]; then
+            LAN_IP=$(docker run --rm --network host busybox \
+              ip route get "$LAN_GATEWAY" 2>/dev/null \
+              | awk '{for(i=1;i<=NF;i++) if ($i=="src") print $(i+1)}')
+          fi
+
+          # Fallback: use the host's default gateway
+          if [ -z "$LAN_IP" ] || [ "$LAN_IP" = "127.0.0.1" ]; then
+            LAN_IP=$(docker run --rm --network host busybox \
+              ip route 2>/dev/null \
+              | awk '/^default/{for(i=1;i<=NF;i++) if ($i=="via") print $(i+1); exit}')
+          fi
+
+          # Last resort: bind on all interfaces
+          if [ -z "$LAN_IP" ] || [ "$LAN_IP" = "127.0.0.1" ]; then
+            LAN_IP="0.0.0.0"
+            echo "::warning::Could not discover LAN IP, binding on 0.0.0.0"
+          fi
+
+          echo "lan_ip=$LAN_IP" >> "$GITHUB_OUTPUT"
+          echo "Host IP for testbed: $LAN_IP"
+
+      # Let Docker pick a free host port (two colons = random port),
+      # then discover it with "docker port".  Retries on race conditions.
+      # No --rm: the container persists so you can inspect it after
+      # the workflow ends.
       - name: Start ephemeral FlatPress testbed
         env:
           PLUGIN_URL: ${{ steps.resolve_plugin.outputs.plugin_url }}
@@ -228,31 +248,38 @@ jobs:
           LAN_IP: ${{ steps.lan_ip.outputs.lan_ip }}
         run: |
           set -euo pipefail
-          PORT_MIN=20000
-          PORT_MAX=40000
+          CONTAINER="flatpress-test-${{ github.run_id }}"
 
-          find_free_port() {
-            local p
-            p=$(( (RANDOM % (PORT_MAX - PORT_MIN + 1)) + PORT_MIN ))
-            if netstat -tln | awk '{print $4}' | grep -q ":${p}\$"; then
-              return 1
-            fi
-            echo "$p"
-          }
-
-          for i in 1 2 3; do
-            PORT=$(find_free_port) || continue
-            if docker run -d --rm \
+          for i in 1 2 3 4 5; do
+            # -p "IP::80" → Docker picks a random free port on the host
+            if docker run -d \
                  --tmpfs /var/www/html:size=256m \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
-                 -p "${LAN_IP}:${PORT}:80" \
-                 --name "flatpress-test-${{ github.run_id }}" \
+                 -p "${LAN_IP}::80" \
+                 --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
-              echo "Ambiente di collaudo: http://${LAN_IP}:${PORT}/" | tee -a "$GITHUB_STEP_SUMMARY"
+
+              # Wait a beat for the port mapping to settle
+              sleep 1
+
+              # Discover the randomly-assigned host port
+              PORT=$(docker port "$CONTAINER" 80/tcp 2>/dev/null \
+                     | head -1 | cut -d: -f2)
+
+              if [ -z "$PORT" ]; then
+                echo "::warning::Container started but port mapping not ready (attempt $i)"
+                docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+                continue
+              fi
+
+              echo "Ambiente di collaudo: http://${LAN_IP}:${PORT}/" \
+                   | tee -a "$GITHUB_STEP_SUMMARY"
               exit 0
-            elif grep -q "port is already allocated" /tmp/docker_run_err; then
+
+            elif grep -q "port is already allocated" /tmp/docker_run_err 2>/dev/null; then
+              echo "Port collision on attempt $i, retrying…"
               continue
             else
               cat /tmp/docker_run_err >&2
@@ -260,7 +287,7 @@ jobs:
             fi
           done
 
-          echo "::error::Could not find a free port after 3 attempts" >&2
+          echo "::error::Could not start testbed container after 5 attempts" >&2
           exit 1
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
