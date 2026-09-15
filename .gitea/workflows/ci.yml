@@ -249,7 +249,7 @@ jobs:
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
 
-              # Wait for the container to start and port mapping to settle
+              # Wait for the container to start and port mapping to settle 
               sleep 3
 
               # Discover the randomly-assigned host port
