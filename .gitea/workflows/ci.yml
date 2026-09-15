@@ -220,13 +220,14 @@ jobs:
             NET=$(echo "$LAN_RANGE" | cut -d/ -f1)
             PREFIX=$(echo "$LAN_RANGE" | cut -d/ -f2)
 
-            # List every non-loopback IPv4 on the host (no -P; busybox-safe)
-            ALL_IPS=$(ip -4 addr show \
+            # Use --network host to see the REAL host interfaces,
+            # not the runner container's bridge network.
+            ALL_IPS=$(docker run --rm --network host alpine sh -c \
+              'ip -4 addr show' \
               | awk '/inet /{print $2}' \
               | sed 's/\/.*//' \
               | grep -v '^127\.')
 
-            # Keep the first IP that falls inside the subnet
             while IFS= read -r ip; do
               [ -z "$ip" ] && continue
               mask=$(( 0xFFFFFFFF << (32 - PREFIX) ))
@@ -271,7 +272,8 @@ jobs:
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
             if docker run -d \
-                 --tmpfs /var/www/html:size=256m \
+                 --tmpfs /var/www/html:size=512m \
+                 --restart unless-stopped \
                  --dns 192.168.188.120 \
                  --dns 192.168.188.110 \
                  --dns 192.168.188.105 \
