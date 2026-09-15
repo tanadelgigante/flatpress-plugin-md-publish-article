@@ -256,6 +256,10 @@ jobs:
             # -p "IP::80" → Docker picks a random free port on the host
             if docker run -d \
                  --tmpfs /var/www/html:size=256m \
+                 --dns 192.168.188.120 \
+                 --dns 192.168.188.110 \
+                 --dns 192.168.188.105 \
+                 --add-host repo.kenshiro.lab.tana:192.168.188.110 \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
