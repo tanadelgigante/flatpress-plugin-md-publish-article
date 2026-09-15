@@ -1,10 +1,10 @@
 <?php
 /**
- * Plugin Name: Publish Article Plugin
+ * Plugin Name: Publish Markdown Article Plugin
  * Plugin URI: https://www.flatpress.org
  * Description: Allows publishing articles from Markdown files with properties, with configurable import folder and import frequency.
- * Version: 0.2
- * Author: Your Name
+ * Version: 0.9
+ * Author: Il Gigante
  */
 
 require_once 'ArticleProcessor.php';

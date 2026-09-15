@@ -1,6 +1,6 @@
 {
     "name": "flatpress/publisharticle",
-    "description": "Publish Article plugin for FlatPress",
+    "description": "Publish Markdown Article plugin for FlatPress",
     "require-dev": {
         "phpunit/phpunit": "^10.0 || ^11.0"
     },

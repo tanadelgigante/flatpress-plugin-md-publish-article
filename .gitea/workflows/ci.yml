@@ -106,6 +106,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      archive_name: ${{ steps.build.outputs.archive_name }}
     steps:
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache nodejs npm zip git
@@ -126,6 +128,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build installation archive
+        id: build
         run: |
           PLUGIN_DIR="publisharticle"
           ARCHIVE_NAME="publisharticle-$(date +%Y%m%d-%H%M%S).zip"
@@ -133,8 +136,9 @@ jobs:
           cp README.md LICENSE.md "$PLUGIN_DIR/"
           zip -r "$ARCHIVE_NAME" "$PLUGIN_DIR"
 
-          # Store archive name for the upload step
+          # Store archive name for the upload step and as a job output
           echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
+          echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
 
       # Upload the zip to the Gitea Generic Package Registry
       # Uses a dedicated PAT (scope write:package) since the built-in job
@@ -185,27 +189,19 @@ jobs:
             update-ca-certificates
           fi
 
-      # Locate the zip the "package" job just uploaded
+      # Build the direct download URL — Gitea Package Registry serves
+      # generic packages anonymously, no auth header required.
       - name: Resolve plugin package URL
         id: resolve_plugin
-        env:
-          PKGTOKEN: ${{ secrets.DUNGEONPAT }}
         run: |
-          set -euo pipefail
           OWNER="${{ github.repository_owner }}"
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${{ github.run_id }}"
-          PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
+          ZIP_FILE="${{ needs.package.outputs.archive_name }}"
+          PLUGIN_URL="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}/${ZIP_FILE}"
 
-          FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_BASE}/-/files")
-          ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
-          if [ -z "$ZIP_FILE" ]; then
-            echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
-            echo "API response: $FILES" >&2
-            exit 1
-          fi
-
-          echo "plugin_url=${PKG_BASE}/${ZIP_FILE}" >> "$GITHUB_OUTPUT"
+          echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
+          echo "Resolved plugin URL: ${PLUGIN_URL}"
 
       # Ask the host's real network stack (not the job container's bridge
       # interface) for the route to the LAN gateway, so we get the correct
