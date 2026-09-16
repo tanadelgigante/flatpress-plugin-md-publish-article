@@ -6,7 +6,7 @@ env:
   TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
   # Internal DNS resolvers; used by every runner job (writes /etc/resolv.conf)
   # and by the testbed container (via the --dns flags built in the testbed job).
-  INTERNAL_DNS: "${{ vars.DNs }}"
+  INTERNAL_DNS: "${{ vars.DNS }}"
 
 on:
   push:
@@ -294,7 +294,7 @@ jobs:
                  $DNS_FLAGS \
                  $ADD_HOST_FLAGS \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
-                 -v "$MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
+                 -v "$TESTBED_MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
