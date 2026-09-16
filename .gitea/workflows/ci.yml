@@ -4,6 +4,9 @@ env:
   TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
   TESTBED_LAN_RANGE: "${{ vars.LAN_RANGE }}"
   TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
+  # Internal DNS resolvers; used by every runner job (writes /etc/resolv.conf)
+  # and by the testbed container (via the --dns flags built in the testbed job).
+  INTERNAL_DNS: "${{ vars.RUNNER_LAN_GATEWAY }}"
 
 on:
   push:
@@ -26,6 +29,23 @@ jobs:
   lint:
     runs-on: lab
     steps:
+      # Point the runner at the internal DNS resolvers so actions/checkout,
+      # composer, and php can resolve repo.kenshiro.lab.tana over HTTPS.
+      # $INTERNAL_DNS comes from the workflow-level env block.
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
       # Node is needed by the JS actions (checkout etc.). No container: the
       # actions run on the runner so they inherit its network/DNS, which can
       # resolve repo.kenshiro.lab.tana.
@@ -46,7 +66,7 @@ jobs:
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
             git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-          fi
+          fi      
 
       - uses: actions/checkout@v4
 
@@ -70,6 +90,20 @@ jobs:
   test:
     runs-on: lab
     steps:
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
       - name: Install tooling (Node, PHP, zip, curl)
         run: apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-xmlwriter php84-tokenizer php84-ctype php84-simplexml php84-curl curl zip
 
@@ -115,6 +149,20 @@ jobs:
     outputs:
       archive_name: ${{ steps.build.outputs.archive_name }}
     steps:
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache ca-certificates nodejs npm zip git
 
@@ -176,6 +224,22 @@ jobs:
       contents: read
       packages: read
     steps:
+      # Point the runner at the internal DNS resolvers so it can resolve the
+      # Gitea hostname while reaching the Package Registry in later steps.
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
       # docker-cli is needed to launch the testbed container and to run the
       # throwaway --network host container for LAN IP discovery. Requires
       # /var/run/docker.sock reachable from this runner's job containers on
@@ -222,6 +286,9 @@ jobs:
           PLUGIN_AUTH_HEADER: "Authorization: token ${{ secrets.DUNGEONPAT }}"
           FLATPRESS_URL: ${{ vars.FLATPRESS_STABLE_URL }}
           HOSTNAME: ${{ steps.runner.outputs.hostname }}
+          # List of "ip fqdn" lines used to map internal hosts into the
+          # testbed container via --add-host.
+          HOSTS: ${{ vars.HOSTS }}
         run: |
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
@@ -232,15 +299,33 @@ jobs:
           # can verify the internal Gitea certificate.
           CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
+          # Build the --dns flags for the container from the internal
+          # resolvers so the testbed can resolve repo.kenshiro.lab.tana.
+          DNS_FLAGS=""
+          for ns in $INTERNAL_DNS; do
+            DNS_FLAGS="$DNS_FLAGS --dns $ns"
+          done
+          echo "Testbed DNS flags:${DNS_FLAGS}"
+
+          # Build the --add-host flags for the container from $HOSTS, which
+          # holds one "ip fqdn" pair per line, e.g.:
+          #   192.168.188.110 repo.kenshiro.lab.tana
+          ADD_HOST_FLAGS=""
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            set -- $entry
+            ip=$1; fqdn=$2
+            ADD_HOST_FLAGS="$ADD_HOST_FLAGS --add-host ${fqdn}:${ip}"
+          done <<< "$HOSTS"
+          echo "Testbed add-host flags:${ADD_HOST_FLAGS}"
+
           for i in 1 2 3 4 5; do
             # -p "IP::80" → Docker picks a random free port on the host
             if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
                  --restart unless-stopped \
-                 --dns 192.168.188.120 \
-                 --dns 192.168.188.110 \
-                 --dns 192.168.188.105 \
-                 --add-host repo.kenshiro.lab.tana:192.168.188.110 \
+                 $DNS_FLAGS \
+                 $ADD_HOST_FLAGS \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
                  -v "$MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
@@ -293,6 +378,22 @@ jobs:
     outputs:
       release_version: ${{ steps.resolve_version.outputs.version }}
     steps:
+      # Point the runner at the internal DNS resolvers so it can resolve
+      # the Gitea hostname during checkout and release operations.
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
       - name: Install tooling (Node, zip, git)
         run: apk add --no-cache ca-certificates nodejs npm zip git
 
