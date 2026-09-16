@@ -6,7 +6,7 @@ env:
   TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
   # Internal DNS resolvers; used by every runner job (writes /etc/resolv.conf)
   # and by the testbed container (via the --dns flags built in the testbed job).
-  INTERNAL_DNS: "${{ vars.RUNNER_LAN_GATEWAY }}"
+  INTERNAL_DNS: "${{ vars.DNs }}"
 
 on:
   push:
