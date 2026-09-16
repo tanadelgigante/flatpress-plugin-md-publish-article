@@ -24,6 +24,57 @@ on:
 permissions:
   contents: read
 
+# ─────────────────────────────────────────────────────────────────────
+# YAML anchors used across all jobs to avoid repeating the same steps.
+# The x-* top-level keys are ignored by the Actions engine (x- is the
+# conventional prefix for extension keys), they only hold the definitions.
+# ─────────────────────────────────────────────────────────────────────
+# Step: write the internal resolvers into /etc/resolv.conf.
+x-dns: &dns
+  - name: Configure internal DNS
+    run: |
+      set -euo pipefail
+      resolvconf=/etc/resolv.conf
+      if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+        echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+        exit 0
+      fi
+      : > "$resolvconf"
+      for ns in $INTERNAL_DNS; do
+        printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+      done
+      echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
+# Step: install the internal Gitea CA into the system trust store.
+# Full version — also sets NODE_EXTRA_CA_CERTS and git sslCAInfo for
+# jobs that run composer / npm / git-clone (lint, test, package, release).
+x-gitea-ca-full: &gitea-ca-full
+  - name: Trust the Gitea CA
+    env:
+      DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+    run: |
+      set -euo pipefail
+      if [ -n "$DUNGEONCACERT" ]; then
+        printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+        update-ca-certificates
+        echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+        git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+      fi
+
+# Step: install the internal Gitea CA — minimal version (no
+# NODE_EXTRA_CA_CERTS / git sslCAInfo) for the testbed job which only
+# needs the cert in the system store.
+x-gitea-ca-minimal: &gitea-ca-minimal
+  - name: Trust the Gitea CA
+    env:
+      DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+    run: |
+      set -euo pipefail
+      if [ -n "$DUNGEONCACERT" ]; then
+        printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+        update-ca-certificates
+      fi
+
 jobs:
   # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
   lint:
@@ -32,41 +83,23 @@ jobs:
       # Point the runner at the internal DNS resolvers so actions/checkout,
       # composer, and php can resolve repo.kenshiro.lab.tana over HTTPS.
       # $INTERNAL_DNS comes from the workflow-level env block.
-      - name: Configure internal DNS
-        run: |
-          set -euo pipefail
-          resolvconf=/etc/resolv.conf
-          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-            exit 0
-          fi
-          : > "$resolvconf"
-          for ns in $INTERNAL_DNS; do
-            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-          done
-          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+      - <<: *dns
 
       # Node is needed by the JS actions (checkout etc.). No container: the
       # actions run on the runner so they inherit its network/DNS, which can
       # resolve repo.kenshiro.lab.tana.
-      # IMPORTANT: ca-certificates must be part of the FIRST apk add, otherwise
-      # apk cannot verify the TLS certificate of the Alpine mirror and fails
-      # with "TLS: server certificate not trusted".
+      # Bootstrap trick: the runner image ships no CA bundle, so apk cannot
+      # verify the mirror's TLS cert when fetching the index ("TLS: server
+      # certificate not trusted" → every package shown as "no such package").
+      # Use http:// for this install (Alpine's /etc/apk/keys signatures still
+      # guarantee package integrity), then restore https:// afterwards.
       - name: Install tooling (Node, PHP, zip)
-        run: apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv zip
-
-      # Trust the Gitea CA so git over HTTPS verifies against the internal CA
-      - name: Trust the Gitea CA
-        env:
-          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          set -euo pipefail
-          if [ -n "$DUNGEONCACERT" ]; then
-            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-            update-ca-certificates
-            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-          fi      
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv zip
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - <<: *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -90,34 +123,15 @@ jobs:
   test:
     runs-on: lab
     steps:
-      - name: Configure internal DNS
-        run: |
-          set -euo pipefail
-          resolvconf=/etc/resolv.conf
-          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-            exit 0
-          fi
-          : > "$resolvconf"
-          for ns in $INTERNAL_DNS; do
-            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-          done
-          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+      - <<: *dns
 
       - name: Install tooling (Node, PHP, zip, curl)
-        run: apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-xmlwriter php84-tokenizer php84-ctype php84-simplexml php84-curl curl zip
-
-      - name: Trust the Gitea CA
-        env:
-          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          set -euo pipefail
-          if [ -n "$DUNGEONCACERT" ]; then
-            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-            update-ca-certificates
-            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-          fi
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-xmlwriter php84-tokenizer php84-ctype php84-simplexml php84-curl curl zip
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - <<: *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -149,34 +163,15 @@ jobs:
     outputs:
       archive_name: ${{ steps.build.outputs.archive_name }}
     steps:
-      - name: Configure internal DNS
-        run: |
-          set -euo pipefail
-          resolvconf=/etc/resolv.conf
-          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-            exit 0
-          fi
-          : > "$resolvconf"
-          for ns in $INTERNAL_DNS; do
-            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-          done
-          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+      - <<: *dns
 
       - name: Install tooling (Node, zip, git)
-        run: apk add --no-cache ca-certificates nodejs npm zip git
-
-      - name: Trust the Gitea CA
-        env:
-          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          set -euo pipefail
-          if [ -n "$DUNGEONCACERT" ]; then
-            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-            update-ca-certificates
-            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-          fi
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates nodejs npm zip git
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - <<: *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -224,38 +219,19 @@ jobs:
       contents: read
       packages: read
     steps:
-      # Point the runner at the internal DNS resolvers so it can resolve the
-      # Gitea hostname while reaching the Package Registry in later steps.
-      - name: Configure internal DNS
-        run: |
-          set -euo pipefail
-          resolvconf=/etc/resolv.conf
-          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-            exit 0
-          fi
-          : > "$resolvconf"
-          for ns in $INTERNAL_DNS; do
-            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-          done
-          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+      - <<: *dns
 
       # docker-cli is needed to launch the testbed container and to run the
       # throwaway --network host container for LAN IP discovery. Requires
       # /var/run/docker.sock reachable from this runner's job containers on
       # all 4 hosts.
       - name: Install tooling (docker CLI, curl)
-        run: apk add --no-cache ca-certificates docker-cli curl
-
-      - name: Trust the Gitea CA
-        env:
-          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          set -euo pipefail
-          if [ -n "$DUNGEONCACERT" ]; then
-            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-            update-ca-certificates
-          fi
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates docker-cli curl
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - <<: *gitea-ca-minimal
 
       # Build the direct download URL — Gitea Package Registry serves
       # generic packages anonymously, no auth header required.
@@ -378,36 +354,15 @@ jobs:
     outputs:
       release_version: ${{ steps.resolve_version.outputs.version }}
     steps:
-      # Point the runner at the internal DNS resolvers so it can resolve
-      # the Gitea hostname during checkout and release operations.
-      - name: Configure internal DNS
-        run: |
-          set -euo pipefail
-          resolvconf=/etc/resolv.conf
-          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-            exit 0
-          fi
-          : > "$resolvconf"
-          for ns in $INTERNAL_DNS; do
-            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-          done
-          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+      - <<: *dns
 
       - name: Install tooling (Node, zip, git)
-        run: apk add --no-cache ca-certificates nodejs npm zip git
-
-      - name: Trust the Gitea CA
-        env:
-          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
         run: |
-          set -euo pipefail
-          if [ -n "$DUNGEONCACERT" ]; then
-            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-            update-ca-certificates
-            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-          fi
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates nodejs npm zip git
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - <<: *gitea-ca-full
 
       - uses: actions/checkout@v4
         with:
