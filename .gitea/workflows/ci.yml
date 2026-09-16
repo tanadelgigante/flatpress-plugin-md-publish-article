@@ -368,7 +368,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Resolve the release version from version.ini (e.g. "0.0.1-SNAPSHOT" -> "v0.0.1")
+      # Resolve the release version from version.ini (e.g. "0.0.1-SNAPSHOT" -> "v0.0.1") 
       # For tag pushes, github.ref_name already is "v0.0.1"; for manual dispatch, derive it.
       - name: Resolve release version
         id: resolve_version
