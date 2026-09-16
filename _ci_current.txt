@@ -124,6 +124,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "$DUNGEONCACERT" ]; then
+            apk add --no-cache ca-certificates
             printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
             update-ca-certificates
             echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
