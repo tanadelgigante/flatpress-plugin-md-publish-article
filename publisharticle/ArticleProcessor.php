@@ -101,10 +101,12 @@ class ArticleProcessor {
         }
 
         // IMMEDIATE: write directly into the content tree
-        $ok = $this->writer->saveEntry($id, $serialized);
-        return $ok
-            ? ['id' => $id, 'scheduled' => false, 'images' => $uploaded]
-            : false;
+        // saveEntry() may deduplicate the ID if the same second was already used
+        $finalId = $this->writer->saveEntry($id, $serialized);
+        if ($finalId === false) {
+            return false;
+        }
+        return ['id' => $finalId, 'scheduled' => false, 'images' => $uploaded];
     }
 
     /**

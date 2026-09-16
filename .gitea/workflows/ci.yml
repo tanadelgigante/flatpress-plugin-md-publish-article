@@ -3,6 +3,7 @@ name: CI
 env:
   TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
   TESTBED_LAN_RANGE: "${{ vars.LAN_RANGE }}"
+  TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
 
 on:
   push:
@@ -242,6 +243,7 @@ jobs:
                  --dns 192.168.188.105 \
                  --add-host repo.kenshiro.lab.tana:192.168.188.110 \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
+                 -v "$MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \

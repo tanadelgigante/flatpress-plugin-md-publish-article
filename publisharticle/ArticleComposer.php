@@ -75,6 +75,64 @@ class ArticleComposer {
         // Fenced code blocks: ```lang ... ``` -> [code]...[/code]
         $text = preg_replace('/```(?:[a-zA-Z0-9_-]+)?\r?\n(.*?)\r?\n```/s', '[code]$1[/code]', $text);
 
+        // Markdown tables -> HTML <table> (FlatPress allows inline HTML)
+        $text = preg_replace_callback(
+            '/(?:^[ \t]*\|.+\|[ \t]*\r?\n)+/m',
+            function ($block) {
+                $lines = preg_split('/\r?\n/', trim($block[0]));
+                // Need at least header + separator + one data row
+                if (count($lines) < 3) {
+                    return $block[0];
+                }
+
+                // Parse header
+                $headerCells = array_map('trim', explode('|', trim($lines[0], ' |')));
+                // Parse separator to detect alignment
+                $seps = array_map('trim', explode('|', trim($lines[1], ' |')));
+                $aligns = [];
+                foreach ($seps as $s) {
+                    if (preg_match('/^(:?-+:?)$/', $s, $am)) {
+                        $left  = $am[1][0] === ':';
+                        $right = substr($am[1], -1) === ':';
+                        $aligns[] = $left && $right ? 'center' : ($right ? 'right' : 'left');
+                    } else {
+                        $aligns[] = 'left';
+                    }
+                }
+
+                $html = '<table>' . "\n";
+                // Header row
+                $html .= '<thead><tr>';
+                foreach ($headerCells as $i => $cell) {
+                    $a = isset($aligns[$i]) ? $aligns[$i] : 'left';
+                    $html .= '<th style="text-align:' . $a . '">' . trim($cell) . '</th>';
+                }
+                $html .= '</tr></thead>' . "\n";
+
+                // Data rows
+                $html .= '<tbody>';
+                for ($r = 2; $r < count($lines); $r++) {
+                    if (trim($lines[$r]) === '') {
+                        continue;
+                    }
+                    $cells = array_map('trim', explode('|', trim($lines[$r], ' |')));
+                    $html .= '<tr>';
+                    foreach ($cells as $i => $cell) {
+                        $a = isset($aligns[$i]) ? $aligns[$i] : 'left';
+                        $html .= '<td style="text-align:' . $a . '">' . $cell . '</td>';
+                    }
+                    $html .= '</tr>';
+                }
+                $html .= '</tbody></table>';
+                return $html;
+            },
+            $text
+        );
+
+        // Task lists: - [x] done / - [ ] todo  -> HTML checkbox lists
+        $text = preg_replace('/^- \[x\]\s+(.+)$/mi', '<li style="list-style:none"><input type="checkbox" checked disabled> $1</li>', $text);
+        $text = preg_replace('/^- \[ \]\s+(.+)$/mi', '<li style="list-style:none"><input type="checkbox" disabled> $1</li>', $text);
+
         // Headers: # Title -> [h2]Title[/h2], ## -> [h2], etc.
         $text = preg_replace('/^######\s+(.+)$/m', '[h6]$1[/h6]', $text);
         $text = preg_replace('/^#####\s+(.+)$/m', '[h5]$1[/h5]', $text);
@@ -109,16 +167,22 @@ class ArticleComposer {
         // Inline code: `code` -> [code]code[/code]
         $text = preg_replace('/`(.+?)`/', '[code]$1[/code]', $text);
 
-        // Images: ![alt](path width=N) -> [img="path" alt="alt" width="N"]
-        $text = preg_replace_callback('/!\[([^\]]*)\]\(([^)]+?)(?:\s+width=(\d+))?\)/', function ($m) {
+        // Images: ![alt](path width=N height=M) -> [img="path" alt="alt" width="N" height="M"]
+        $text = preg_replace_callback('/!\[([^\]]*)\]\(([^)\s]+)(?:\s+width=(\d+))?(?:\s+height=(\d+))?(?:[^)]*)\)/', function ($m) {
             // Prepend images/ to plain filenames without a directory prefix
             $path = trim($m[2]);
 
-            // Keep absolute URLs (http://, https://, protocol-relative //, any scheme ftp://,
+            // Keep absolute URLs (http://, https://, any scheme ftp://,
             // data: URIs, mailto:, and absolute paths /uploads/...) untouched:
             // they point to images hosted on other sites.
-            if (preg_match('#^(?:[a-z][a-z0-9+.-]*:|//|/)#i', $path)) {
-                // leave $path as-is (remote or absolute)
+            if (preg_match('#^[a-z][a-z0-9+.-]*:#i', $path)) {
+                // leave $path as-is (remote or absolute with scheme)
+            } elseif (preg_match('#^//#', $path)) {
+                // protocol-relative URL — prepend https: so FlatPress
+                // bbcode_remap_url() does not mangle it with BLOG_BASEURL
+                $path = 'https:' . $path;
+            } elseif (preg_match('#^/#', $path)) {
+                // absolute path — leave as-is
             } elseif (!preg_match('#^(images/|attachs/)#i', $path)) {
                 $path = 'images/' . ltrim($path, '/');
             }
@@ -126,6 +190,9 @@ class ArticleComposer {
             $attrs = 'alt="' . $m[1] . '"';
             if (!empty($m[3])) {
                 $attrs .= ' width="' . $m[3] . '"';
+            }
+            if (!empty($m[4])) {
+                $attrs .= ' height="' . $m[4] . '"';
             }
             return '[img="' . $path . '" ' . $attrs . ']';
         }, $text);

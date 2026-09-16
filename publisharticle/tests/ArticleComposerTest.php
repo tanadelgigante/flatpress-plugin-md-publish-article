@@ -197,4 +197,68 @@ class ArticleComposerTest extends TestCase {
         $ts = $this->composer->extractScheduleDate(['scheduled_date' => (string) $future], time());
         $this->assertNotNull($ts);
     }
+
+    // ── Tables ───────────────────────────────────────────────────
+
+    public function testMarkdownTableBasic(): void {
+        $md = "| Nome | Ruolo |\n|------|-------|\n| Alice | Admin |\n| Bob | Editor |";
+        $result = $this->composer->markdownToBBCode($md);
+        $this->assertStringContainsString('<table>', $result);
+        $this->assertStringContainsString('<th', $result);
+        $this->assertStringContainsString('Nome', $result);
+        $this->assertStringContainsString('Alice', $result);
+        $this->assertStringContainsString('Editor', $result);
+    }
+
+    public function testMarkdownTableAlignment(): void {
+        $md = "| Sinistra | Centro | Destra |\n|:---------|:------:|-------:|\n| a | b | c |";
+        $result = $this->composer->markdownToBBCode($md);
+        $this->assertStringContainsString('text-align:left', $result);
+        $this->assertStringContainsString('text-align:center', $result);
+        $this->assertStringContainsString('text-align:right', $result);
+    }
+
+    public function testMarkdownTableTooFewRowsIgnored(): void {
+        $md = "| Header |\n|--------|";
+        $result = $this->composer->markdownToBBCode($md);
+        $this->assertStringNotContainsString('<table>', $result);
+    }
+
+    // ── Height in image BBCode ───────────────────────────────────
+
+    public function testMarkdownImageWithHeight(): void {
+        $result = $this->composer->markdownToBBCode('![pic](photo.jpg width=500 height=300)');
+        $this->assertStringContainsString('width="500"', $result);
+        $this->assertStringContainsString('height="300"', $result);
+    }
+
+    public function testMarkdownImageWithHeightOnly(): void {
+        $result = $this->composer->markdownToBBCode('![pic](photo.jpg height=250)');
+        $this->assertStringNotContainsString('width=', $result);
+        $this->assertStringContainsString('height="250"', $result);
+    }
+
+    // ── Protocol-relative URLs ───────────────────────────────────
+
+    public function testMarkdownImageProtocolRelativeUrl(): void {
+        $result = $this->composer->markdownToBBCode('![pic](//cdn.example.com/pic.png)');
+        $this->assertStringContainsString('https://cdn.example.com/pic.png', $result);
+        $this->assertStringNotContainsString('images/', $result);
+    }
+
+    // ── Task lists ───────────────────────────────────────────────
+
+    public function testMarkdownTaskListChecked(): void {
+        $result = $this->composer->markdownToBBCode('- [x] Fatto');
+        $this->assertStringContainsString('checkbox', $result);
+        $this->assertStringContainsString('checked', $result);
+        $this->assertStringContainsString('Fatto', $result);
+    }
+
+    public function testMarkdownTaskListUnchecked(): void {
+        $result = $this->composer->markdownToBBCode('- [ ] Da fare');
+        $this->assertStringContainsString('checkbox', $result);
+        $this->assertStringNotContainsString('checked', $result);
+        $this->assertStringContainsString('Da fare', $result);
+    }
 }

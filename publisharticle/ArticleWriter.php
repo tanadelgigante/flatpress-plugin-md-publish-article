@@ -84,6 +84,46 @@ class ArticleWriter {
     }
 
     /**
+     * Checks whether an entry file already exists in the content tree.
+     *
+     * @param string $id Entry ID
+     * @return bool True if the entry already exists on disk
+     */
+    public function entryExists($id) {
+        return file_exists($this->getEntryBasePath($id) . '.txt');
+    }
+
+    /**
+     * Given a base entry ID, returns a collision-free variant by
+     * incrementing the HHMMSS suffix (+1s per attempt) until the
+     * entry does not exist yet. The ID format entryYYMMDD-HHMMSS
+     * is preserved so FlatPress path resolution still works.
+     *
+     * @param string $id Base entry ID (entryYYMMDD-HHMMSS)
+     * @return string A unique entry ID
+     */
+    public function findFreeEntryId($id) {
+        $attempt = $id;
+        $guard = 0;
+        while ($this->entryExists($attempt) && $guard < 60) {
+            // bump the timestamp by one second
+            if (preg_match('/^entry(\d{6})-(\d{6})$/', $attempt, $m)) {
+                $ts = DateTime::createFromFormat('ymd-His', $m[1] . '-' . $m[2]);
+                if ($ts !== false) {
+                    $ts->modify('+1 second');
+                    $attempt = 'entry' . $ts->format('ymd-His');
+                } else {
+                    break;
+                }
+            } else {
+                break;
+            }
+            $guard++;
+        }
+        return $attempt;
+    }
+
+    /**
      * Writes the sidecar view counter file.
      * Creates the sidecar directory if missing:
      * <content_root>/<yy>/<MM>/entryYYMMDD-HHMMSS/view_counter.txt
@@ -111,9 +151,11 @@ class ArticleWriter {
      *
      * @param string $id Entry ID
      * @param string $content Serialized entry string
-     * @return bool True on success, false on any failure
+     * @return string|false The final (possibly deduplicated) entry ID on success, false on failure
      */
     public function saveEntry($id, $content) {
+        // Avoid overwriting an existing entry (same-second publish collision)
+        $id = $this->findFreeEntryId($id);
         if (!$this->writeEntryFile($id, $content)) {
             return false;
         }
@@ -121,7 +163,7 @@ class ArticleWriter {
             return false;
         }
         $this->updateIndex($id, $content);
-        return true;
+        return $id;
     }
 
     /**
@@ -195,7 +237,7 @@ class ArticleWriter {
      * @return bool True on success, false on failure
      */
     public function promotePendingEntry($pending) {
-        $id = $pending['id'];
+        $id = $this->findFreeEntryId($pending['id']);
         $content = file_get_contents($pending['file']);
         if ($content === false) {
             return false;
