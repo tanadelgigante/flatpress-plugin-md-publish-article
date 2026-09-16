@@ -24,82 +24,42 @@ on:
 permissions:
   contents: read
 
-# ─────────────────────────────────────────────────────────────────────
-# YAML anchors used across all jobs to avoid repeating the same steps.
-# The x-* top-level keys are ignored by the Actions engine (x- is the
-# conventional prefix for extension keys), they only hold the definitions.
-# ─────────────────────────────────────────────────────────────────────
-# Step: write the internal resolvers into /etc/resolv.conf.
-x-dns: &dns
-  - name: Configure internal DNS
-    run: |
-      set -euo pipefail
-      resolvconf=/etc/resolv.conf
-      if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
-        echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
-        exit 0
-      fi
-      : > "$resolvconf"
-      for ns in $INTERNAL_DNS; do
-        printf 'nameserver %s\n' "$ns" >> "$resolvconf"
-      done
-      echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
-
-# Step: install the internal Gitea CA into the system trust store.
-# Full version — also sets NODE_EXTRA_CA_CERTS and git sslCAInfo for
-# jobs that run composer / npm / git-clone (lint, test, package, release).
-x-gitea-ca-full: &gitea-ca-full
-  - name: Trust the Gitea CA
-    env:
-      DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
-    run: |
-      set -euo pipefail
-      if [ -n "$DUNGEONCACERT" ]; then
-        printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-        update-ca-certificates
-        echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
-        git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
-      fi
-
-# Step: install the internal Gitea CA — minimal version (no
-# NODE_EXTRA_CA_CERTS / git sslCAInfo) for the testbed job which only
-# needs the cert in the system store.
-x-gitea-ca-minimal: &gitea-ca-minimal
-  - name: Trust the Gitea CA
-    env:
-      DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
-    run: |
-      set -euo pipefail
-      if [ -n "$DUNGEONCACERT" ]; then
-        printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
-        update-ca-certificates
-      fi
-
 jobs:
   # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
   lint:
     runs-on: lab
     steps:
-      # Point the runner at the internal DNS resolvers so actions/checkout,
-      # composer, and php can resolve repo.kenshiro.lab.tana over HTTPS.
-      # $INTERNAL_DNS comes from the workflow-level env block.
-      *dns
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
-      # Node is needed by the JS actions (checkout etc.). No container: the
-      # actions run on the runner so they inherit its network/DNS, which can
-      # resolve repo.kenshiro.lab.tana.
-      # Bootstrap trick: the runner image ships no CA bundle, so apk cannot
-      # verify the mirror's TLS cert when fetching the index ("TLS: server
-      # certificate not trusted" → every package shown as "no such package").
-      # Use http:// for this install (Alpine's /etc/apk/keys signatures still
-      # guarantee package integrity), then restore https:// afterwards.
       - name: Install tooling (Node, PHP, zip)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
           apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv zip
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      *gitea-ca-full
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+          fi
 
       - uses: actions/checkout@v4
 
@@ -123,7 +83,19 @@ jobs:
   test:
     runs-on: lab
     steps:
-      *dns
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
       - name: Install tooling (Node, PHP, zip, curl)
         run: |
@@ -131,7 +103,17 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-xmlwriter php84-tokenizer php84-ctype php84-simplexml php84-curl curl zip
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      *gitea-ca-full
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+          fi
 
       - uses: actions/checkout@v4
 
@@ -151,8 +133,6 @@ jobs:
         run: vendor/bin/phpunit --testdox
 
   # ── Job 3: Build installation package ────────────────────────────
-  # Triggered by workflow_dispatch (manual "promote" from Gitea UI).
-  # Uploads the zip to the Gitea Generic Package Registry for the release job to retrieve.
   package:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
     needs: [lint, test]
@@ -163,7 +143,19 @@ jobs:
     outputs:
       archive_name: ${{ steps.build.outputs.archive_name }}
     steps:
-      *dns
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
       - name: Install tooling (Node, zip, git)
         run: |
@@ -171,7 +163,17 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm zip git
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      *gitea-ca-full
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+          fi
 
       - uses: actions/checkout@v4
 
@@ -188,10 +190,6 @@ jobs:
           echo "ARCHIVE=$ARCHIVE_NAME" >> "$GITHUB_ENV"
           echo "archive_name=$ARCHIVE_NAME" >> "$GITHUB_OUTPUT"
 
-      # Upload the zip to the Gitea Generic Package Registry
-      # Uses a dedicated PAT (scope write:package) since the built-in job
-      # token (GITEA_TOKEN) authenticates as the synthetic ActionsUser,
-      # which Gitea does not grant Packages API access to.
       - name: Upload package to Gitea Packages
         env:
           PKGTOKEN: ${{ secrets.DUNGEONPAT }}
@@ -208,10 +206,6 @@ jobs:
           echo "UPLOADED_VERSION=${PKG_VERSION}" >> "$GITHUB_ENV"
 
   # ── Job 3.5: Spin up an ephemeral FlatPress testbed with the built plugin ──
-  # Runs after "package", using the artifact it just uploaded to the Gitea
-  # Package Registry (same run, same package version "build-<run_id>").
-  # NOTE: does NOT gate "release" — that job only needs [lint, test], so a
-  # failure here never blocks a release.
   testbed:
     needs: [package]
     runs-on: lab
@@ -219,22 +213,36 @@ jobs:
       contents: read
       packages: read
     steps:
-      *dns
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
-      # docker-cli is needed to launch the testbed container and to run the
-      # throwaway --network host container for LAN IP discovery. Requires
-      # /var/run/docker.sock reachable from this runner's job containers on
-      # all 4 hosts.
       - name: Install tooling (docker CLI, curl)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
           apk add --no-cache ca-certificates docker-cli curl
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      *gitea-ca-minimal
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+          fi
 
-      # Build the direct download URL — Gitea Package Registry serves
-      # generic packages anonymously, no auth header required.
       - name: Resolve plugin package URL
         id: resolve_plugin
         run: |
@@ -247,45 +255,29 @@ jobs:
           echo "plugin_url=${PLUGIN_URL}" >> "$GITHUB_OUTPUT"
           echo "Resolved plugin URL: ${PLUGIN_URL}"
 
-      # Get the runner hostname so the testbed URL uses a resolvable name
       - name: Get runner hostname
         id: runner
         run: echo "hostname=$(hostname)" >> "$GITHUB_OUTPUT"
 
-      # Let Docker pick a free host port (two colons = random port),
-      # then discover it with "docker port".  Retries on race conditions.
-      # No --rm: the container persists so you can inspect it after
-      # the workflow ends.
       - name: Start ephemeral FlatPress testbed
         env:
           PLUGIN_URL: ${{ steps.resolve_plugin.outputs.plugin_url }}
           PLUGIN_AUTH_HEADER: "Authorization: token ${{ secrets.DUNGEONPAT }}"
           FLATPRESS_URL: ${{ vars.FLATPRESS_STABLE_URL }}
           HOSTNAME: ${{ steps.runner.outputs.hostname }}
-          # List of "ip fqdn" lines used to map internal hosts into the
-          # testbed container via --add-host.
           HOSTS: ${{ vars.HOSTS }}
         run: |
           set -euo pipefail
           CONTAINER="flatpress-test-${{ github.run_id }}"
 
-          # The runner already trusts the Gitea CA (installed in the
-          # "Trust the Gitea CA" step above).  Mount the runner's
-          # updated cert bundle into the container so curl (and PHP)
-          # can verify the internal Gitea certificate.
           CA_BUNDLE="/etc/ssl/certs/ca-certificates.crt"
 
-          # Build the --dns flags for the container from the internal
-          # resolvers so the testbed can resolve repo.kenshiro.lab.tana.
           DNS_FLAGS=""
           for ns in $INTERNAL_DNS; do
             DNS_FLAGS="$DNS_FLAGS --dns $ns"
           done
           echo "Testbed DNS flags:${DNS_FLAGS}"
 
-          # Build the --add-host flags for the container from $HOSTS, which
-          # holds one "ip fqdn" pair per line, e.g.:
-          #   192.168.188.110 repo.kenshiro.lab.tana
           ADD_HOST_FLAGS=""
           while IFS= read -r entry; do
             [ -n "$entry" ] || continue
@@ -296,7 +288,6 @@ jobs:
           echo "Testbed add-host flags:${ADD_HOST_FLAGS}"
 
           for i in 1 2 3 4 5; do
-            # -p "IP::80" → Docker picks a random free port on the host
             if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
                  --restart unless-stopped \
@@ -311,10 +302,8 @@ jobs:
                  --name "$CONTAINER" \
                  "${{ env.TESTBED_IMAGE }}" 2>/tmp/docker_run_err; then
 
-              # Wait for the container to start and port mapping to settle 
               sleep 3
 
-              # Discover the randomly-assigned host port
               PORT=$(docker inspect "$CONTAINER" \
                 --format '{{range $k, $v := .NetworkSettings.Ports}}{{if eq $k "80/tcp"}}{{(index $v 0).HostPort}}{{end}}{{end}}' 2>/dev/null)
 
@@ -343,7 +332,6 @@ jobs:
           exit 1
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
-  # Triggered by a push tag v*, or manually (job=release) to reuse a tested artifact
   release:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release')
     needs: [lint, test]
@@ -354,7 +342,19 @@ jobs:
     outputs:
       release_version: ${{ steps.resolve_version.outputs.version }}
     steps:
-      *dns
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
       - name: Install tooling (Node, zip, git)
         run: |
@@ -362,14 +362,22 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm zip git
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      *gitea-ca-full
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+          fi
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # Resolve the release version from version.ini (e.g. "0.0.1-SNAPSHOT" -> "v0.0.1") 
-      # For tag pushes, github.ref_name already is "v0.0.1"; for manual dispatch, derive it.
       - name: Resolve release version
         id: resolve_version
         run: |
@@ -382,7 +390,6 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Release version: $VERSION"
 
-      # Manual release: retrieve the tested zip from the Gitea Package Registry
       - name: Download build artifact
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -400,7 +407,6 @@ jobs:
           PKG_VERSION="build-${RUN_ID}"
           PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
 
-          # List files in the package version to find the zip filename
           FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_BASE}/-/files")
           ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
           if [ -z "$ZIP_FILE" ]; then
@@ -415,14 +421,12 @@ jobs:
             -o "release-assets/publisharticle-${VER}.zip"
           echo "Downloaded: publisharticle-${VER}.zip from ${PKG_VERSION}"
 
-          # Clean up: delete the temporary package version
           curl -sS -X DELETE \
             -H "Authorization: token ${PKGTOKEN}" \
             "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}" \
             -o /dev/null -w "Deleted package ${PKG_VERSION}: HTTP %{http_code}\n" || \
             echo "Warning: could not delete package ${PKG_VERSION}"
 
-      # Tag release: build the archive from the source tree
       - name: Build installation archive
         if: github.event_name != 'workflow_dispatch'
         run: |
@@ -448,7 +452,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # The tag push leaves us on a detached HEAD: switch to the default branch
           BRANCH="${{ github.event.repository.default_branch }}"
           if [ -z "$BRANCH" ]; then
             echo "::error::Cannot determine the repository default branch" >&2
@@ -458,7 +461,6 @@ jobs:
           git checkout "$BRANCH"
           git pull --ff-only origin "$BRANCH"
 
-          # Read current version, e.g. "0.0.1-SNAPSHOT"
           CURRENT="$(tr -d '[:space:]' < version.ini)"
           BASE="${CURRENT%-SNAPSHOT}"
           MAJOR="${BASE%%.*}"; REST="${BASE#*.}"
