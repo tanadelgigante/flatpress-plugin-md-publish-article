@@ -75,59 +75,11 @@ class ArticleComposer {
         // Fenced code blocks: ```lang ... ``` -> [code]...[/code]
         $text = preg_replace('/```(?:[a-zA-Z0-9_-]+)?\r?\n(.*?)\r?\n```/s', '[code]$1[/code]', $text);
 
-        // Markdown tables -> HTML <table> (FlatPress allows inline HTML)
-        $text = preg_replace_callback(
-            '/(?:^[ \t]*\|.+\|[ \t]*\r?\n)+/m',
-            function ($block) {
-                $lines = preg_split('/\r?\n/', trim($block[0]));
-                // Need at least header + separator + one data row
-                if (count($lines) < 3) {
-                    return $block[0];
-                }
-
-                // Parse header
-                $headerCells = array_map('trim', explode('|', trim($lines[0], ' |')));
-                // Parse separator to detect alignment
-                $seps = array_map('trim', explode('|', trim($lines[1], ' |')));
-                $aligns = [];
-                foreach ($seps as $s) {
-                    if (preg_match('/^(:?-+:?)$/', $s, $am)) {
-                        $left  = $am[1][0] === ':';
-                        $right = substr($am[1], -1) === ':';
-                        $aligns[] = $left && $right ? 'center' : ($right ? 'right' : 'left');
-                    } else {
-                        $aligns[] = 'left';
-                    }
-                }
-
-                $html = '<table>' . "\n";
-                // Header row
-                $html .= '<thead><tr>';
-                foreach ($headerCells as $i => $cell) {
-                    $a = isset($aligns[$i]) ? $aligns[$i] : 'left';
-                    $html .= '<th style="text-align:' . $a . '">' . trim($cell) . '</th>';
-                }
-                $html .= '</tr></thead>' . "\n";
-
-                // Data rows
-                $html .= '<tbody>';
-                for ($r = 2; $r < count($lines); $r++) {
-                    if (trim($lines[$r]) === '') {
-                        continue;
-                    }
-                    $cells = array_map('trim', explode('|', trim($lines[$r], ' |')));
-                    $html .= '<tr>';
-                    foreach ($cells as $i => $cell) {
-                        $a = isset($aligns[$i]) ? $aligns[$i] : 'left';
-                        $html .= '<td style="text-align:' . $a . '">' . $cell . '</td>';
-                    }
-                    $html .= '</tr>';
-                }
-                $html .= '</tbody></table>';
-                return $html;
-            },
-            $text
-        );
+        // Markdown tables -> HTML <table> (FlatPress allows inline HTML).
+        // Robust line-based scanner: collect consecutive lines that look like
+        // table rows, then convert a block only when it has a valid header,
+        // separator and at least one data row.
+        $text = $this->convertTables($text);
 
         // Task lists: - [x] done / - [ ] todo  -> HTML checkbox lists
         $text = preg_replace('/^- \[x\]\s+(.+)$/mi', '<li style="list-style:none"><input type="checkbox" checked disabled> $1</li>', $text);
@@ -201,6 +153,141 @@ class ArticleComposer {
         $text = preg_replace('/\[([^\]]+)\]\(([^)]+)\)/', '[url="$2"]$1[/url]', $text);
 
         return $text;
+    }
+
+    /**
+     * Converts Markdown tables into HTML tables.
+     *
+     * Scans the text line by line and groups consecutive lines that start
+     * with a pipe (`|`) into candidate table blocks. A block is converted
+     * only when it contains a header row, a valid alignment separator row
+     * (cells made of `-`, `:` or both) and at least one data row.
+     *
+     * @param string $text
+     * @return string
+     */
+    private function convertTables($text) {
+        $lines = preg_split('/\r?\n/', $text);
+        $out = [];
+        $count = count($lines);
+
+        for ($i = 0; $i < $count; $i++) {
+            $line = $lines[$i];
+
+            // Candidate table row: optional leading spaces then a pipe.
+            if (preg_match('/^[ \t]*\|/', $line)) {
+                // Collect the run of consecutive table lines.
+                $block = [];
+                $j = $i;
+                while ($j < $count && preg_match('/^[ \t]*\|/', $lines[$j])) {
+                    $block[] = $lines[$j];
+                    $j++;
+                }
+
+                // Need header + separator + at least one data row.
+                if (count($block) >= 3 && $this->isTableSeparator($block[1])) {
+                    $out[] = $this->renderTable($block);
+                    $i = $j - 1;
+                    continue;
+                }
+
+                // Not a valid table: emit the lines unchanged and move on.
+                foreach ($block as $b) {
+                    $out[] = $b;
+                }
+                $i = $j - 1;
+                continue;
+            }
+
+            $out[] = $line;
+        }
+
+        return implode("\n", $out);
+    }
+
+    /**
+     * Check whether a line is a valid Markdown table separator row.
+     *
+     * @param string $line
+     * @return bool
+     */
+    private function isTableSeparator($line) {
+        $cells = $this->splitTableRow($line);
+        if (empty($cells)) {
+            return false;
+        }
+        foreach ($cells as $cell) {
+            if (!preg_match('/^:?-+:?$/', $cell)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Split a Markdown table row into its trimmed cell values.
+     *
+     * @param string $line
+     * @return array
+     */
+    private function splitTableRow($line) {
+        $line = trim($line);
+        $line = trim($line, '|');
+        if ($line === '') {
+            return [];
+        }
+        return array_map('trim', explode('|', $line));
+    }
+
+    /**
+     * Render a validated Markdown table block as an HTML table.
+     *
+     * @param array $block Consecutive table lines (header, separator, rows).
+     * @return string
+     */
+    private function renderTable(array $block) {
+        $headerCells = $this->splitTableRow($block[0]);
+        $sepCells    = $this->splitTableRow($block[1]);
+
+        // Determine per-column alignment from the separator row.
+        $aligns = [];
+        foreach ($sepCells as $s) {
+            $left  = isset($s[0]) && $s[0] === ':';
+            $right = substr($s, -1) === ':';
+            if ($left && $right) {
+                $aligns[] = 'center';
+            } elseif ($right) {
+                $aligns[] = 'right';
+            } else {
+                $aligns[] = 'left';
+            }
+        }
+
+        $html  = '<table>' . "\n";
+        $html .= '<thead><tr>';
+        foreach ($headerCells as $idx => $cell) {
+            $a = isset($aligns[$idx]) ? $aligns[$idx] : 'left';
+            $html .= '<th style="text-align:' . $a . '">' . $cell . '</th>';
+        }
+        $html .= '</tr></thead>' . "\n";
+
+        $html .= '<tbody>';
+        for ($r = 2; $r < count($block); $r++) {
+            if (trim($block[$r]) === '') {
+                continue;
+            }
+            $cells = $this->splitTableRow($block[$r]);
+            $html .= '<tr>';
+            foreach ($cells as $idx => $cell) {
+                $a = isset($aligns[$idx]) ? $aligns[$idx] : 'left';
+                $html .= '<td style="text-align:' . $a . '">' . $cell . '</td>';
+            }
+            $html .= '</tr>';
+        }
+        $html .= '</tbody>' . "\n";
+        $html .= '</table>';
+
+        return $html;
     }
 
     /**
