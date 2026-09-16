@@ -83,7 +83,7 @@ jobs:
       # Point the runner at the internal DNS resolvers so actions/checkout,
       # composer, and php can resolve repo.kenshiro.lab.tana over HTTPS.
       # $INTERNAL_DNS comes from the workflow-level env block.
-      - <<: *dns
+      *dns
 
       # Node is needed by the JS actions (checkout etc.). No container: the
       # actions run on the runner so they inherit its network/DNS, which can
@@ -99,7 +99,7 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv zip
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      - <<: *gitea-ca-full
+      *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -123,7 +123,7 @@ jobs:
   test:
     runs-on: lab
     steps:
-      - <<: *dns
+      *dns
 
       - name: Install tooling (Node, PHP, zip, curl)
         run: |
@@ -131,7 +131,7 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm php-cli php84-openssl php84-phar php84-mbstring php84-iconv php84-dom php84-xml php84-xmlwriter php84-tokenizer php84-ctype php84-simplexml php84-curl curl zip
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      - <<: *gitea-ca-full
+      *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -163,7 +163,7 @@ jobs:
     outputs:
       archive_name: ${{ steps.build.outputs.archive_name }}
     steps:
-      - <<: *dns
+      *dns
 
       - name: Install tooling (Node, zip, git)
         run: |
@@ -171,7 +171,7 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm zip git
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      - <<: *gitea-ca-full
+      *gitea-ca-full
 
       - uses: actions/checkout@v4
 
@@ -219,7 +219,7 @@ jobs:
       contents: read
       packages: read
     steps:
-      - <<: *dns
+      *dns
 
       # docker-cli is needed to launch the testbed container and to run the
       # throwaway --network host container for LAN IP discovery. Requires
@@ -231,7 +231,7 @@ jobs:
           apk add --no-cache ca-certificates docker-cli curl
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      - <<: *gitea-ca-minimal
+      *gitea-ca-minimal
 
       # Build the direct download URL — Gitea Package Registry serves
       # generic packages anonymously, no auth header required.
@@ -354,7 +354,7 @@ jobs:
     outputs:
       release_version: ${{ steps.resolve_version.outputs.version }}
     steps:
-      - <<: *dns
+      *dns
 
       - name: Install tooling (Node, zip, git)
         run: |
@@ -362,7 +362,7 @@ jobs:
           apk add --no-cache ca-certificates nodejs npm zip git
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
-      - <<: *gitea-ca-full
+      *gitea-ca-full
 
       - uses: actions/checkout@v4
         with:
