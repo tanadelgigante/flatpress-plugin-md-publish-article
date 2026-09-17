@@ -422,8 +422,9 @@ jobs:
           PKG_NAME="publisharticle"
           PKG_VERSION="build-${RUN_ID}"
           PKG_BASE="${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
+          PKG_API="${GITHUB_SERVER_URL}/api/v1/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}"
 
-          FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_BASE}/-/files")
+          FILES=$(curl -sS -H "Authorization: token ${PKGTOKEN}" "${PKG_API}/files")
           ZIP_FILE=$(printf '%s' "$FILES" | grep -o '"name":"[^"]*\.zip"' | head -1 | cut -d'"' -f4)
           if [ -z "$ZIP_FILE" ]; then
             echo "::error::No zip file found in package ${PKG_NAME}@${PKG_VERSION}" >&2
@@ -436,12 +437,6 @@ jobs:
             "${PKG_BASE}/${ZIP_FILE}" \
             -o "release-assets/publisharticle-${VER}.zip"
           echo "Downloaded: publisharticle-${VER}.zip from ${PKG_VERSION}"
-
-          curl -sS -X DELETE \
-            -H "Authorization: token ${PKGTOKEN}" \
-            "${GITHUB_SERVER_URL}/api/packages/${OWNER}/generic/${PKG_NAME}/${PKG_VERSION}" \
-            -o /dev/null -w "Deleted package ${PKG_VERSION}: HTTP %{http_code}\n" || \
-            echo "Warning: could not delete package ${PKG_VERSION}"
 
       - name: Build installation archive
         if: github.event_name != 'workflow_dispatch'

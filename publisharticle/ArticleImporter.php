@@ -11,14 +11,13 @@ require_once 'ArticleProcessor.php';
  *
  * Flusso:
  * 1. Scansiona la cartella di import per file .md / .markdown / .txt
- *    (inclusi i file *.pending lasciati dagli articoli schedulati)
  * 2. Per ogni file:
  *    a. legge il contenuto Markdown (frontmatter + body)
  *    b. importa tutte le immagini della cartella nella cartella immagini di FlatPress
  *    c. pubblica l'articolo tramite ArticleProcessor::process()
  *    d. sposta il file in una sottocartella "done" (o in errore in "failed");
- *       gli articoli con data futura restano come *.pending e vengono
- *       ripubblicati alla prima scansione dopo la scadenza
+ *       gli articoli con data futura restano nella cartella di import e
+ *       vengono pubblicati alla prima scansione dopo la scadenza
  *
  * In questo modo gli articoli possono essere caricati via FTP/SFTP/scp
  * nella cartella di import, e il plugin li pubblica automaticamente
@@ -361,13 +360,6 @@ class ArticleImporter {
                     $files[] = $file;
                 }
             }
-            // Scheduled files kept in the folder: re-scanned so they get
-            // published as soon as their publish time has come.
-            foreach (glob($this->importDir . '*.' . $ext . '.pending') ?: [] as $file) {
-                if (is_file($file)) {
-                    $files[] = $file;
-                }
-            }
         }
         sort($files);
         return $files;
@@ -379,9 +371,10 @@ class ArticleImporter {
      * Steps:
      * - reads the file content
      * - applies default category/status if missing from frontmatter
-     * - imports sibling images (same base name / images in the folder)
+     * - imports all images found in the folder
      * - publishes via ArticleProcessor::process()
-     * - moves the file to done/ or failed/ subfolder
+     * - moves the file to done/ or failed/ subfolder (future-dated articles
+     *   are left in place and re-scanned until their publish time)
      *
      * @param string $file Absolute path to the Markdown file
      * @return array ['success' => bool, 'id' => string|false, 'message' => string, 'images' => array]
@@ -407,11 +400,6 @@ class ArticleImporter {
             return $result;
         }
 
-        $isPending = (bool) preg_match(
-            '/\.(?:' . implode('|', $this->markdownExtensions) . ')\.pending$/',
-            $file
-        );
-
         // Import every image of the folder, KEEPING original names; a name
         // clash with a DIFFERENT existing image fails the article. Images
         // already imported with the same content are treated as done.
@@ -435,9 +423,8 @@ class ArticleImporter {
 
         // Process, deferring scheduling: the source file is kept and re-scanned
         // until its publish time comes, then it is published for real.
-        $cleanBase = preg_replace('/\.pending$/', '', $base);
         $res = $this->processor->process(
-            $content, [], pathinfo($cleanBase, PATHINFO_FILENAME), true
+            $content, [], pathinfo($base, PATHINFO_FILENAME), true
         );
 
         if ($res === false) {
@@ -456,19 +443,14 @@ class ArticleImporter {
             : 'Published';
 
         if (!empty($res['scheduled'])) {
-            // Future-dated article: keep the source in the import folder as
-            // a pending file (never move it to "done" before its time). The
-            // images are already imported, move their sources out of the way.
+            // Future-dated article: leave the source file in the import folder
+            // (it is re-scanned until its time has come). The images are
+            // already imported, move their sources out of the way.
             $this->moveSourceImages($this->doneSubdir);
-            if (!$isPending && !$this->markPending($file, $result['message'])) {
+            if (!$this->markPending($file, $result['message'])) {
                 $result['warning'] = 'Cannot keep the scheduled file in the import folder.';
             }
             return $result;
-        }
-
-        // Due: a pending file is renamed back to its normal name, then archived.
-        if ($isPending) {
-            $file = $this->stripPendingSuffix($file);
         }
 
         if (!$this->archiveSource($file, $this->doneSubdir, $result['message'])) {
@@ -501,14 +483,13 @@ class ArticleImporter {
     }
 
     /**
-     * Marks a future-dated (scheduled) article as pending, KEEPING it in
-     * the import folder: the file is renamed in place with a ".pending"
-     * suffix so that scan() does not pick it up again, but it is never
-     * moved to "done" before its scheduled time.
+     * Hook invoked for a future-dated (scheduled) article found in the
+     * import folder. Currently a no-op: the source file is simply left
+     * where it is and re-scanned until its publish time has come.
      *
      * @param string $file Absolute path of the source .md file
      * @param string $note Optional note (e.g. scheduled date)
-     * @return bool True if the file was kept in the import folder as pending
+     * @return bool True, so the caller never warns
      */
     public function markPending($file, $note = '') {
         //if ($this->archiveInPlace($file, 'pending', $note)) {
@@ -519,11 +500,11 @@ class ArticleImporter {
     }
 
     /**
-     * Renames a file in place with a suffix (".done", ".failed", ".pending")
+     * Renames a file in place with a suffix (".done", ".failed")
      * inside the import folder, so it no longer matches scan()'s glob.
      *
      * @param string $file Absolute path of the source .md file
-     * @param string $suffix done|failed|pending
+     * @param string $suffix done|failed
      * @param string $note Optional note file content
      * @return bool True on success
      */
@@ -715,28 +696,6 @@ class ArticleImporter {
                 }
             }
         }
-    }
-
-    /**
-     * Removes the ".pending" suffix from a file name, renaming it in place
-     * so the file can be archived with its normal name.
-     *
-     * @param string $file Absolute path
-     * @return string The clean path (or the original on failure/clash)
-     */
-    private function stripPendingSuffix($file) {
-        if (substr($file, -8) !== '.pending') {
-            return $file;
-        }
-        $clean = substr($file, 0, -8);
-        if ($clean === '' || file_exists($clean)) {
-            return $file;
-        }
-        if (@rename($file, $clean)) {
-            @unlink($file . '.note');
-            return $clean;
-        }
-        return $file;
     }
 
     /**
