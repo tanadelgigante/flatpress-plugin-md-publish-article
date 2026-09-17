@@ -105,8 +105,14 @@ class ArticleImporter {
     public function ensureImportDir() {
         if (!is_dir($this->importDir)) {
             if (!mkdir($this->importDir, 0755, true)) {
+                error_log(__METHOD__ . ': cannot create import dir: ' . $this->importDir);
                 return false;
             }
+        }
+        if (!is_writable($this->importDir)) {
+            error_log(__METHOD__ . ': import dir not writable: ' . $this->importDir
+                . ' — check ownership and permissions');
+            return false;
         }
         $this->protectImportDir();
         $this->deployCaddySnippet();
@@ -402,7 +408,9 @@ class ArticleImporter {
 
         if ($res === false) {
             $result['message'] = 'Processing failed.';
-            $this->moveTo($file, $this->failedSubdir, $result['message']);
+            if (!$this->archiveSource($file, $this->failedSubdir, $result['message'])) {
+                $result['warning'] = 'Cannot move file out of the import folder.';
+            }
             return $result;
         }
 
@@ -413,8 +421,45 @@ class ArticleImporter {
             ? 'Scheduled for ' . date('Y-m-d H:i:s', $res['scheduled'])
             : 'Published';
 
-        $this->moveTo($file, $this->doneSubdir, $result['message']);
+        if (!$this->archiveSource($file, $this->doneSubdir, $result['message'])) {
+            $result['warning'] = 'Cannot move file out of the import folder.';
+        }
         return $result;
+    }
+
+    /**
+     * Moves a processed file out of the import folder.
+     *
+     * Tries moveTo() (done/ or failed/ subfolder) first. If that fails —
+     * e.g. the subfolder cannot be created or the directory is not
+     * writable — the file is renamed in-place with a ".done"/".failed"
+     * suffix so that scan() never picks it up again. This guarantees
+     * that a file cannot be published twice.
+     *
+     * @param string $file Absolute path of the source .md file
+     * @param string $subdir done|failed
+     * @param string $note Optional note/error description
+     * @return bool True if the file no longer matches scan()
+     */
+    public function archiveSource($file, $subdir, $note = '') {
+        if ($this->moveTo($file, $subdir, $note)) {
+            return true;
+        }
+
+        $marker = $file . '.' . $subdir;
+        if (file_exists($marker)) {
+            $marker .= '.' . time();
+        }
+        if (@rename($file, $marker)) {
+            @file_put_contents($marker . '.note', $note);
+            error_log(__METHOD__ . ': moveTo() failed for ' . $file
+                . '; archived in place as ' . $marker);
+            return true;
+        }
+
+        error_log(__METHOD__ . ': cannot archive ' . $file . ' in place ('
+            . $marker . ') — import dir not writable?');
+        return false;
     }
 
     /**
@@ -553,6 +598,7 @@ class ArticleImporter {
         $targetDir = rtrim($this->importDir, '/\\') . '/' . trim($subdir, '/\\') . '/';
         if (!is_dir($targetDir)) {
             if (!mkdir($targetDir, 0755, true)) {
+                error_log(__METHOD__ . ': cannot create target dir: ' . $targetDir);
                 return false;
             }
         }
@@ -566,12 +612,24 @@ class ArticleImporter {
         if (@rename($file, $target)) {
             $success = true;
         } elseif (@copy($file, $target)) {
-            @unlink($file);
-            $success = true;
+            if (@unlink($file)) {
+                $success = true;
+            } else {
+                @unlink($target);
+            }
         }
 
-        if ($success && $note !== '') {
+        if (!$success) {
+            error_log(__METHOD__ . ': failed to move ' . $file . ' to ' . $target
+                . ' — ' . (error_get_last() ? error_get_last()['message'] : 'unknown reason')
+                . ' — check that both ' . dirname($file) . ' and ' . $targetDir . ' are writable');
+            return false;
+        }
+
+        if ($note !== '') {
             @file_put_contents($target . '.note', $note);
+            @chmod($target, 0644);
+            @chmod($target . '.note', 0644);
         }
 
         // Also move any sibling images with matching base name

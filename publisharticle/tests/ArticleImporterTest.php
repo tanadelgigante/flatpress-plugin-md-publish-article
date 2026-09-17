@@ -123,6 +123,20 @@ class ArticleImporterTest extends TestCase {
         $this->assertSame([], $importer->scan());
     }
 
+    public function testScanIgnoresMarkedArchivedFiles(): void {
+        file_put_contents(self::TMP_DIR . '/post.md', 'a');
+        file_put_contents(self::TMP_DIR . '/post.md.done', 'archived');
+        file_put_contents(self::TMP_DIR . '/post.md.done.note', 'note');
+
+        $importer = new ArticleImporter(null, self::TMP_DIR . '/', []);
+        $files = $importer->scan();
+
+        $this->assertCount(1, $files);
+        // The archived post.md.done must never be picked up again
+        $this->assertStringContainsString('post.md', $files[0]);
+        $this->assertStringNotContainsString('.done', $files[0]);
+    }
+
     // ── moveTo ─────────────────────────────────────────────────────
 
     public function testMoveToCreatesSubdirAndMovesFile(): void {
@@ -210,6 +224,56 @@ class ArticleImporterTest extends TestCase {
         $this->assertFileExists($tmp . 'failed/bad.md.note');
     }
 
+    // ── importFile: in-place archival when moveTo() fails ─────────
+
+    public function testImportFileArchivesInPlaceWhenMoveToFails(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'post.md', "---\ntitle: Test\n---\nBody");
+
+        $importer = new ArticleImporterNoMove(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        $this->assertTrue($result['success']);
+        // The file must NOT stay in scan scope, even though done/ could not be used
+        $this->assertFileDoesNotExist($tmp . 'post.md');
+        $this->assertFileExists($tmp . 'post.md.done');
+        $this->assertFileExists($tmp . 'post.md.done.note');
+        // A second import run must not re-import it
+        $this->assertSame([], $importer->scan());
+    }
+
+    public function testImportFileArchivesFailedInPlaceWhenMoveToFails(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'bad.md', "---\ntitle: Bad\n---\nBody");
+
+        $importer = new ArticleImporterNoMove(new FakeFailingProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'bad.md');
+
+        $this->assertFalse($result['success']);
+        $this->assertFileDoesNotExist($tmp . 'bad.md');
+        $this->assertFileExists($tmp . 'bad.md.failed');
+        $this->assertSame([], $importer->scan());
+    }
+
+    public function testImportFileWarnsWhenNothingCanBeMoved(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'post.md', "---\ntitle: Test\n---\nBody");
+        chmod($tmp, 0555);
+        if (is_writable($tmp)) {
+            chmod($tmp, 0777);
+            $this->markTestSkipped('cannot simulate a read-only dir (running with elevated privileges)');
+        }
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        chmod($tmp, 0777);
+        $this->assertTrue($result['success']);
+        $this->assertNotEmpty($result['warning']);
+        // The file is still there, so it would be published again — warning is the only signal
+        $this->assertFileExists($tmp . 'post.md');
+    }
+
     // ── constructor / directories ──────────────────────────────────
 
     public function testCustomImportDirIsUsed(): void {
@@ -274,5 +338,15 @@ class FakeFailingProcessor {
 
     public function getImageUploader() {
         return new ImageUploader();
+    }
+}
+
+/**
+ * Importer whose moveTo() always fails, forcing importFile()
+ * to fall back to in-place archival.
+ */
+class ArticleImporterNoMove extends ArticleImporter {
+    public function moveTo($file, $subdir, $note = '') {
+        return false;
     }
 }

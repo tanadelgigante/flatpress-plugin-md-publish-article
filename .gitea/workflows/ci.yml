@@ -4,6 +4,9 @@ env:
   TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
   TESTBED_LAN_RANGE: "${{ vars.LAN_RANGE }}"
   TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
+  # UID:GID of the import-folder mount owner; passed to docker run as --user
+  # so the testbed processes can write into the (not re-chownable) mount.
+  PROCESS_OWNER: "${{ vars.PROCESS_OWNER }}"
   # Internal DNS resolvers; used by every runner job (writes /etc/resolv.conf)
   # and by the testbed container (via the --dns flags built in the testbed job).
   INTERNAL_DNS: "${{ vars.DNS }}"
@@ -287,12 +290,19 @@ jobs:
           done <<< "$HOSTS"
           echo "Testbed add-host flags:${ADD_HOST_FLAGS}"
 
+          USER_FLAG=""
+          if [ -n "$PROCESS_OWNER" ]; then
+            USER_FLAG="--user $PROCESS_OWNER"
+          fi
+          echo "Testbed user flag:${USER_FLAG}"
+
           for i in 1 2 3 4 5; do
             if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
                  --restart unless-stopped \
                  $DNS_FLAGS \
                  $ADD_HOST_FLAGS \
+                 $USER_FLAG \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
                  -v "$TESTBED_MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \

@@ -127,16 +127,31 @@ if (class_exists('AdminPanelAction')) {
 				}
 				$importer = new ArticleImporter(null, !empty($options['import_folder']) ? $options['import_folder'] : null, $options);
 				$importDir = $importer->getImportDir();
-				$importer->ensureImportDir();
+
+				if (!$importer->ensureImportDir()) {
+					error_log('publisharticle: import dir unavailable or not writable: ' . $importDir);
+					$this->smarty->assign('success', -1);
+					return;
+				}
 
 				$destMd = $importDir . $origName;
-				if (!@move_uploaded_file($tmpMd, $destMd)) {
-					if (!@copy($tmpMd, $destMd)) {
+				if (!move_uploaded_file($tmpMd, $destMd)) {
+					if (!copy($tmpMd, $destMd)) {
+						error_log('publisharticle: cannot save scheduled article to import dir: '
+							. $destMd . ' — ' . (error_get_last() ? error_get_last()['message'] : ''));
 						$this->smarty->assign('success', -1);
 						return;
 					}
 					@unlink($tmpMd);
 				}
+
+				if (!is_file($destMd) || !is_readable($destMd)) {
+					error_log('publisharticle: scheduled article missing after upload: ' . $destMd);
+					$this->smarty->assign('success', -1);
+					return;
+				}
+
+				@chmod($destMd, 0644);
 
 				if (
 					isset($_FILES['images']) &&
@@ -148,11 +163,15 @@ if (class_exists('AdminPanelAction')) {
 							$imgName = basename($_FILES['images']['name'][$i]);
 							$safeImgName = preg_replace('/[^a-zA-Z0-9_.\-]/', '_', $imgName);
 							$destImg = $importDir . $safeImgName;
-							if (!@move_uploaded_file($_FILES['images']['tmp_name'][$i], $destImg)) {
-								if (@copy($_FILES['images']['tmp_name'][$i], $destImg)) {
+							if (!move_uploaded_file($_FILES['images']['tmp_name'][$i], $destImg)) {
+								if (!copy($_FILES['images']['tmp_name'][$i], $destImg)) {
+									error_log('publisharticle: cannot save image to import dir: '
+										. $destImg . ' — ' . (error_get_last() ? error_get_last()['message'] : ''));
+								} else {
 									@unlink($_FILES['images']['tmp_name'][$i]);
 								}
 							}
+							@chmod($destImg, 0644);
 						}
 					}
 				}

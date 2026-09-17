@@ -44,7 +44,7 @@ fp-plugins/
     * `status` — `publish` or `draft`.
 * **Collision Protection**: To prevent accidental overwriting of existing articles, the plugin automatically increments the timestamp in the Entry ID if a collision is detected.
 * **Scheduled Publishing**: Articles with a future `publish_date` are stored in a pending state and automatically published upon the first page load after the scheduled time.
-* **Automatic Import**: Drop `.md`, `.markdown`, `.mdown`, or `.txt` files into the import folder — the plugin scans and processes them automatically on page load.
+* **Automatic Import**: Drop `.md`, `.markdown`, `.mdown`, or `.txt` files into the import folder — the plugin scans and processes them automatically on page load. Processed files are archived into the `done/` (success) or `failed/` (error) subfolder. If the import folder is not writable, files are instead marked in place as `*.md.done` / `*.md.failed` so they are never published twice.
 * **Media Management**: Images found in the Markdown file are automatically detected, moved to `fp-content/images/`, and linked correctly.
 
 ### 🛠 Configuration
