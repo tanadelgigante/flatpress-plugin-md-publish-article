@@ -161,8 +161,7 @@ if (class_exists('AdminPanelAction')) {
 				isset($_FILES['images']) &&
 				!empty($_FILES['images']['name'][0])
 			) {
-				$contentDir = CONTENT_DIR . 'content';
-				$imgDir     = $contentDir . '/images';
+				$imgDir = defined('IMAGES_DIR') ? IMAGES_DIR : 'fp-content/images';
 
 				if (!is_dir($imgDir)) {
 					mkdir($imgDir, 0755, true);
