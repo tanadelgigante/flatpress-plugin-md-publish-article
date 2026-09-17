@@ -160,7 +160,7 @@ jobs:
       - name: Install tooling (Node, zip, git)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
-          apk add --no-cache ca-certificates nodejs npm zip git
+          apk add --no-cache ca-certificates nodejs npm zip git curl 
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
       - name: Trust the Gitea CA
