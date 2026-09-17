@@ -4,12 +4,16 @@ env:
   TESTBED_IMAGE: "${{ vars.IMAGE_NAME }}"
   TESTBED_LAN_RANGE: "${{ vars.LAN_RANGE }}"
   TESTBED_MOUNT_DATA: "${{ vars.MOUNT_DATA }}"
-  # UID:GID of the import-folder mount owner; passed to docker run as --user
+  # UID:GID of the import-folder mount owner. Passed to docker run as
+  # PUID/PGID env: the container sets up as root, then drops via su-exec
   # so the testbed processes can write into the (not re-chownable) mount.
   PROCESS_OWNER: "${{ vars.PROCESS_OWNER }}"
   # Internal DNS resolvers; used by every runner job (writes /etc/resolv.conf)
   # and by the testbed container (via the --dns flags built in the testbed job).
   INTERNAL_DNS: "${{ vars.DNS }}"
+  # Ntfy notification endpoint for the final outcome.
+  NTFY_URL: "${{ vars.NTFY_URL }}"
+  NTFY_TOPIC: "${{ vars.NTFY_TOPIC }}"
 
 on:
   push:
@@ -290,11 +294,27 @@ jobs:
           done <<< "$HOSTS"
           echo "Testbed add-host flags:${ADD_HOST_FLAGS}"
 
-          USER_FLAG=""
+          [ -n "$PROCESS_OWNER" ] && echo "PROCESS_OWNER=$PROCESS_OWNER"
           if [ -n "$PROCESS_OWNER" ]; then
-            USER_FLAG="--user $PROCESS_OWNER"
+            case "$PROCESS_OWNER" in
+              *:*)
+                PUID="${PROCESS_OWNER%%:*}"
+                PGID="${PROCESS_OWNER##*:}"
+                case "$PUID:$PGID" in
+                  *[!0-9]*)
+                    echo "::warning::PROCESS_OWNER must be numeric uid:gid (got '$PROCESS_OWNER'; ignored)"
+                    ;;
+                  *)
+                    USER_ENV_FLAGS="-e PUID=$PUID -e PGID=$PGID"
+                    ;;
+                esac
+                ;;
+              *)
+                echo "::warning::PROCESS_OWNER must be 'uid:gid' (got '$PROCESS_OWNER'; ignored)"
+                ;;
+            esac
           fi
-          echo "Testbed user flag:${USER_FLAG}"  
+          echo "Testbed user env flags:${USER_ENV_FLAGS}"
 
           for i in 1 2 3 4 5; do
             if docker run --pull=always -d \
@@ -302,7 +322,7 @@ jobs:
                  --restart unless-stopped \
                  $DNS_FLAGS \
                  $ADD_HOST_FLAGS \
-                 $USER_FLAG \
+                 $USER_ENV_FLAGS \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
                  -v "$TESTBED_MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
@@ -488,3 +508,66 @@ jobs:
           fi
           git commit -m "Bump version to $NEXT after release $GITHUB_REF_NAME"
           git push origin "$BRANCH"
+
+  # ── Job 5: Notify the outcome on Ntfy ─────────────────────────────
+  notify:
+    if: always()
+    needs: [lint, test, package, testbed, release]
+    runs-on: local
+    permissions:
+      contents: read
+    steps:
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
+      - name: Install curl
+        run: |
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates curl
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - name: Send Ntfy notification
+        env:
+          JOB_RESULTS: "${{ needs.lint.result }},${{ needs.test.result }},${{ needs.package.result }},${{ needs.testbed.result }},${{ needs.release.result }}"
+        run: |
+          set -euo pipefail
+
+          if [ -z "$NTFY_URL" ] || [ -z "$NTFY_TOPIC" ]; then
+            echo "::warning::NTFY_URL/NTFY_TOPIC not set; skipping notification"
+            exit 0
+          fi
+
+          STATUS="success"
+          if [[ "$JOB_RESULTS" == *failure* ]]; then
+            STATUS="failure"
+          elif [[ "$JOB_RESULTS" == *cancelled* ]]; then
+            STATUS="cancelled"
+          fi
+
+          case "$STATUS" in
+            success)   TITLE="CI OK — publisharticle";        TAGS="white_check_mark"; PRIORITY=2 ;;
+            cancelled) TITLE="CI cancellata — publisharticle"; TAGS="no_entry_sign";    PRIORITY=3 ;;
+            *)         TITLE="CI FALLITA — publisharticle";   TAGS="rotating_light";    PRIORITY=5 ;;
+          esac
+
+          MSG="Run ${GITHUB_RUN_ID} ($STATUS)
+          results: $JOB_RESULTS
+          ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          curl -fsS \
+            -H "Title: $TITLE" \
+            -H "Tags: $TAGS" \
+            -H "Priority: $PRIORITY" \
+            -d "$MSG" \
+            "${NTFY_URL%/}/${NTFY_TOPIC}"
