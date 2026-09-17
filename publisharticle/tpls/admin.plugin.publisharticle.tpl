@@ -29,17 +29,10 @@
 		<p class="form-help">{$plang.images_help}</p>
 	</dd>
 
-	<!-- Publication date -->
-	<dt><label for="pub_date">{$plang.date_label}</label></dt>
+	<!-- Publish now -->
+	<dt><label for="publish_now">{$plang.publish_now}</label></dt>
 	<dd>
-		<input type="datetime-local" name="pub_date" id="pub_date"
-			value="{$pub_date|escape}">
-		<label style="margin-left:8px">
-			<input type="checkbox" name="publish_now" id="publish_now"
-				onchange="toggleDateField(this)">
-			{$plang.publish_now}
-		</label>
-		<p class="form-help">{$plang.date_help}</p>
+		<input type="checkbox" name="publish_now" id="publish_now" checked>
 	</dd>
 
 </dl>
@@ -59,16 +52,6 @@
 {/html_form}
 
 <script>
-function toggleDateField(cb) {
-	var dt = document.getElementById('pub_date');
-	dt.disabled = cb.checked;
-	if (cb.checked) {
-		var now = new Date();
-		var pad = function(n) { return n < 10 ? '0' + n : n; };
-		dt.value = now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate()) + 'T' + pad(now.getHours()) + ':' + pad(now.getMinutes());
-	}
-}
-
 function previewMdFile(input) {
 	var file = input.files[0];
 	if (!file) return;

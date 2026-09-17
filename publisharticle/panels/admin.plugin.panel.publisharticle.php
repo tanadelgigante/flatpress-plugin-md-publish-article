@@ -28,6 +28,15 @@ if (class_exists('AdminPanelAction')) {
 			);
 		}
 
+		private $processor = null;
+
+		private function _getProcessor() {
+			if ($this->processor === null) {
+				$this->processor = new ArticleProcessor();
+			}
+			return $this->processor;
+		}
+
 		/**
 		 * Display the upload / publish form.
 		 */
@@ -35,10 +44,7 @@ if (class_exists('AdminPanelAction')) {
 
 			$this->smarty->assign('msgs', array());
 
-			$this->smarty->assign(
-				'pub_date',
-				date('Y-m-d\TH:i')
-			);
+
 
 			$this->_assignPending();
 			$this->_assignRecent();
@@ -64,12 +70,7 @@ if (class_exists('AdminPanelAction')) {
 
 			$this->_assignPending();
 			$this->_assignRecent();
-			$this->smarty->assign(
-				'pub_date',
-				date('Y-m-d\TH:i')
-			);
 
-			return 2;
 		}
 
 		// ── Private helpers ───────────────────────────────────
@@ -111,20 +112,46 @@ if (class_exists('AdminPanelAction')) {
 				return;
 			}
 
+			// ── Check if future scheduled and not publish_now ──
+			$parser = new ArticleParser();
+			$parsed = $parser->parseMarkdown($mdContent);
+			$composer = new ArticleComposer();
+			$scheduleTs = $composer->extractScheduleDate($parsed['properties'], time());
+			$publishNow = isset($_POST['publish_now']) && $_POST['publish_now'] === 'on';
+
+			if (!$publishNow && $scheduleTs !== null) {
+				$options = plugin_getoptions('publisharticle');
+				$importDir = !empty($options['import_folder']) ? $options['import_folder'] : (defined('CONTENT_DIR') ? CONTENT_DIR . 'import-in/' : 'fp-content/content/import-in/');
+				
+				if (!is_dir($importDir)) {
+					mkdir($importDir, 0755, true);
+				}
+
+				$destMd = rtrim($importDir, '/\\') . '/' . $origName;
+				move_uploaded_file($tmpMd, $destMd);
+
+				if (
+					isset($_FILES['images']) &&
+					!empty($_FILES['images']['name'][0])
+				) {
+					$count = count($_FILES['images']['name']);
+					for ($i = 0; $i < $count; $i++) {
+						if ($_FILES['images']['error'][$i] === UPLOAD_ERR_OK) {
+							$imgName = basename($_FILES['images']['name'][$i]);
+							move_uploaded_file($_FILES['images']['tmp_name'][$i], rtrim($importDir, '/\\') . '/' . $imgName);
+						}
+					}
+				}
+
+				$this->smarty->assign('success', 1);
+				return;
+			}
+
 			// ── Status & date ──
 
 			$isDraft = isset($_POST['publisharticle-draft']);
 			$status  = $isDraft ? 'draft' : 'publish';
-			$pubDate = '';
 
-			if (
-				isset($_POST['publish_now']) &&
-				$_POST['publish_now'] === 'on'
-			) {
-				// publish now → leave $pubDate empty
-			} elseif (!empty($_POST['pub_date'])) {
-				$pubDate = $_POST['pub_date'];
-			}
 
 			// ── Upload images (original name, sanitized) ──
 
@@ -199,10 +226,7 @@ if (class_exists('AdminPanelAction')) {
 
 			$overrides = array('status' => $status);
 
-			if ($pubDate !== '') {
-				$dt = str_replace('T', ' ', $pubDate) . ':00';
-				$overrides['pubdate'] = $dt;
-			}
+
 
 			$mdContent = $this->_injectOverrides(
 				$mdContent,
@@ -212,7 +236,7 @@ if (class_exists('AdminPanelAction')) {
 			// ── Process ──
 
 			$baseName = pathinfo($origName, PATHINFO_FILENAME);
-			$processor = new ArticleProcessor();
+			$processor = $this->_getProcessor();
 			$result    = $processor->process(
 				$mdContent,
 				array(),
