@@ -45,8 +45,8 @@ fp-plugins/
 * **Collision Protection**: To prevent accidental overwriting of existing articles, the plugin automatically increments the timestamp in the Entry ID if a collision is detected.
 * **Scheduled Publishing**: Articles with a future `publish_date` are stored in a pending state and automatically published upon the first page load after the scheduled time.
 * **Automatic Import**: Drop `.md`, `.markdown`, `.mdown`, or `.txt` files into the import folder — the plugin scans and processes them automatically on page load. Processed files are archived into the `done/` (success) or `failed/` (error) subfolder. If the import folder is not writable, files are instead marked in place as `*.md.done` / `*.md.failed` so they are never published twice.
-* **Scheduled Imports Stay Pending**: A file with a future `publish_date` is **not** moved to `done/`; it stays in the import folder renamed in place as `*.md.pending` (ignored by the scanner) until its scheduled time.
-* **Media Management**: Images found in the Markdown file are automatically detected, moved to `fp-content/images/` **keeping their original file name**, and linked correctly. If an image name is already in use in the images folder, the whole article import fails and the file is archived into `failed/` — existing images are never overwritten.
+* **Scheduled Imports Stay Pending**: A file with a future `publish_date` is **not** moved to `done/`; it stays in the import folder renamed in place as `*.md.pending`. Pending files are re-scanned on every run and published (then archived to `done/`) as soon as their publish time has come.
+* **Media Management**: **All** image files found in the import folder are imported into `fp-content/images/` **keeping their original file name**, and their sources are moved to `done/`. If an image name is already in use in the images folder (or duplicated in the import folder), the whole article import fails and the file is archived into `failed/` — existing images are never overwritten.
 
 ### 🛠 Configuration
 

@@ -275,21 +275,81 @@ class ArticleImporterTest extends TestCase {
         $tmp = self::TMP_DIR . '/';
         file_put_contents($tmp . 'later.md', "---\ntitle: Later\n---\nBody");
 
-        $importer = new ArticleImporter(new FakeScheduledProcessor(), $tmp, []);
+        $processor = new FakeScheduledProcessor();
+        $importer = new ArticleImporter($processor, $tmp, []);
         $result = $importer->importFile($tmp . 'later.md');
 
         $this->assertTrue($result['success']);
         $this->assertStringContainsString('Scheduled', $result['message']);
+        // The importer must ask the processor to defer scheduling
+        $this->assertTrue($processor->lastDefer);
         // The source stays in the import folder, marked as pending
         $this->assertFileExists($tmp . 'later.md.pending');
         $this->assertFileDoesNotExist($tmp . 'later.md');
         // It must NOT be moved to done/ before its scheduled time
         $this->assertFileDoesNotExist($tmp . 'done/later.md');
-        // And it must never be picked up again by scan()
+        // The pending file is re-scanned (so it can be published when due)
+        $files = $importer->scan();
+        $this->assertContains($tmp . 'later.md.pending', $files);
+        // ...but it is not re-pending itself on a later run
+        $importer->importFile($tmp . 'later.md.pending');
+        $this->assertFileExists($tmp . 'later.md.pending');
+        $this->assertFileDoesNotExist($tmp . 'later.md.pending.pending');
+    }
+
+    public function testImportFilePublishesPendingFileWhenDue(): void {
+        $tmp = self::TMP_DIR . '/';
+        // A pending file whose scheduled time has already passed: process()
+        // no longer sees a future date, so it is published and archived.
+        file_put_contents($tmp . 'later.md.pending', "---\ntitle: Later\n---\nBody");
+        file_put_contents($tmp . 'later.md.pending.note', 'Scheduled for ...');
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'later.md.pending');
+
+        $this->assertTrue($result['success']);
+        $this->assertStringNotContainsString('Scheduled', $result['message']);
+        $this->assertFileDoesNotExist($tmp . 'later.md.pending');
+        $this->assertFileDoesNotExist($tmp . 'later.md.pending.note');
+        $this->assertFileExists($tmp . 'done/later.md');
         $this->assertSame([], $importer->scan());
     }
 
-    // ── importFile: images keep their original names ───────────────
+    public function testScanFindsPendingFiles(): void {
+        file_put_contents(self::TMP_DIR . '/a.md', 'a');
+        file_put_contents(self::TMP_DIR . '/b.md.pending', 'b');
+        file_put_contents(self::TMP_DIR . '/b.md.pending.note', 'note');
+
+        $importer = new ArticleImporter(null, self::TMP_DIR . '/', []);
+        $files = $importer->scan();
+
+        $this->assertCount(2, $files);
+        $this->assertContains(self::TMP_DIR . '/b.md.pending', $files);
+    }
+
+    public function testPendingArticleImportsImagesAddedLater(): void {
+        $tmp = self::TMP_DIR . '/';
+        $imagesDir = rtrim(IMAGES_DIR, '/');
+        $imgName = 'late-image.png';
+        @unlink($imagesDir . '/' . $imgName);
+
+        // The article is already pending; the image is dropped afterwards.
+        file_put_contents($tmp . 'later.md.pending', "---\ntitle: Later\n---\nBody");
+        file_put_contents($tmp . $imgName, 'PNG DATA');
+
+        $importer = new ArticleImporter(new FakeScheduledProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'later.md.pending');
+
+        $this->assertTrue($result['success']);
+        $this->assertContains('images/' . $imgName, $result['images']);
+        $this->assertFileExists($imagesDir . '/' . $imgName);
+        // The article stays pending, the image source leaves the import folder
+        $this->assertFileExists($tmp . 'later.md.pending');
+        $this->assertFileExists($tmp . 'done/' . $imgName);
+        $this->assertFileDoesNotExist($tmp . $imgName);
+    }
+
+    // ── importFile: images are imported with their original names ──
 
     public function testImportFileImportsImageWithOriginalName(): void {
         $tmp = self::TMP_DIR . '/';
@@ -307,7 +367,49 @@ class ArticleImporterTest extends TestCase {
         $this->assertContains('images/' . $imgName, $result['images']);
         $this->assertFileExists($imagesDir . '/' . $imgName);
         $this->assertSame('PNG DATA', file_get_contents($imagesDir . '/' . $imgName));
+        // The article and the imported image source both leave the import folder
         $this->assertFileExists($tmp . 'done/post.md');
+        $this->assertFileExists($tmp . 'done/' . $imgName);
+        $this->assertFileDoesNotExist($tmp . $imgName);
+    }
+
+    public function testImportFileImportsUnreferencedFolderImage(): void {
+        $tmp = self::TMP_DIR . '/';
+        $imagesDir = rtrim(IMAGES_DIR, '/');
+        $imgName = 'unreferenced-image.png';
+        @unlink($imagesDir . '/' . $imgName);
+
+        // The image is NOT referenced in the markdown and does not share the
+        // article basename: every image of the folder is imported anyway.
+        file_put_contents($tmp . 'post.md', "---\ntitle: Post\n---\nBody");
+        file_put_contents($tmp . $imgName, 'PNG DATA');
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        $this->assertTrue($result['success']);
+        $this->assertContains('images/' . $imgName, $result['images']);
+        $this->assertFileExists($imagesDir . '/' . $imgName);
+        $this->assertFileExists($tmp . 'done/' . $imgName);
+    }
+
+    public function testImportFolderImagesTreatsIdenticalImageAsAlreadyImported(): void {
+        $tmp = self::TMP_DIR . '/';
+        $imagesDir = rtrim(IMAGES_DIR, '/');
+        $imgName = 'idempotent-image.png';
+        @unlink($imagesDir . '/' . $imgName);
+        file_put_contents($imagesDir . '/' . $imgName, 'SAME');
+        file_put_contents($tmp . 'post.md', "---\ntitle: Post\n---\nBody");
+        file_put_contents($tmp . $imgName, 'SAME');
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        // Same name + same content is not a clash: the article is published
+        $this->assertTrue($result['success']);
+        $this->assertContains('images/' . $imgName, $result['images']);
+        $this->assertFileExists($tmp . 'done/post.md');
+        $this->assertFileExists($tmp . 'done/' . $imgName);
     }
 
     public function testImportFileFailsWhenImageNameAlreadyUsed(): void {
@@ -397,7 +499,7 @@ class ArticleImporterTest extends TestCase {
  * Stub processor that reports a successful publication.
  */
 class FakeSuccessProcessor {
-    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '', $deferScheduling = false) {
         return ['id' => 'entry260915-120000', 'scheduled' => false, 'images' => []];
     }
 
@@ -410,7 +512,7 @@ class FakeSuccessProcessor {
  * Stub processor that reports a processing failure.
  */
 class FakeFailingProcessor {
-    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '', $deferScheduling = false) {
         return false;
     }
 
@@ -420,10 +522,15 @@ class FakeFailingProcessor {
 }
 
 /**
- * Stub processor that reports a future-scheduled publication.
+ * Stub processor that reports a future-scheduled publication and
+ * records whether the importer asked to defer scheduling.
  */
 class FakeScheduledProcessor {
-    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+    /** @var bool|null */
+    public $lastDefer = null;
+
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '', $deferScheduling = false) {
+        $this->lastDefer = $deferScheduling;
         return ['id' => 'entry260915-130000', 'scheduled' => time() + 86400, 'images' => []];
     }
 

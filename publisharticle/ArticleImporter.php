@@ -11,11 +11,14 @@ require_once 'ArticleProcessor.php';
  *
  * Flusso:
  * 1. Scansiona la cartella di import per file .md / .markdown / .txt
+ *    (inclusi i file *.pending lasciati dagli articoli schedulati)
  * 2. Per ogni file:
  *    a. legge il contenuto Markdown (frontmatter + body)
- *    b. importa le immagini adiacenti nella cartella immagini di FlatPress
+ *    b. importa tutte le immagini della cartella nella cartella immagini di FlatPress
  *    c. pubblica l'articolo tramite ArticleProcessor::process()
- *    d. sposta il file in una sottocartella "done" (o in errore in "failed")
+ *    d. sposta il file in una sottocartella "done" (o in errore in "failed");
+ *       gli articoli con data futura restano come *.pending e vengono
+ *       ripubblicati alla prima scansione dopo la scadenza
  *
  * In questo modo gli articoli possono essere caricati via FTP/SFTP/scp
  * nella cartella di import, e il plugin li pubblica automaticamente
@@ -358,6 +361,13 @@ class ArticleImporter {
                     $files[] = $file;
                 }
             }
+            // Scheduled files kept in the folder: re-scanned so they get
+            // published as soon as their publish time has come.
+            foreach (glob($this->importDir . '*.' . $ext . '.pending') ?: [] as $file) {
+                if (is_file($file)) {
+                    $files[] = $file;
+                }
+            }
         }
         sort($files);
         return $files;
@@ -397,9 +407,15 @@ class ArticleImporter {
             return $result;
         }
 
-        // Import sibling images KEEPING their original names: a name clash
-        // with the FlatPress images folder fails the whole article import.
-        $imgRes = $this->importSiblingImages($file);
+        $isPending = (bool) preg_match(
+            '/\.(?:' . implode('|', $this->markdownExtensions) . ')\.pending$/',
+            $file
+        );
+
+        // Import every image of the folder, KEEPING original names; a name
+        // clash with a DIFFERENT existing image fails the article. Images
+        // already imported with the same content are treated as done.
+        $imgRes = $this->importFolderImages();
         $images = $imgRes['ok'];
 
         if (!empty($imgRes['errors'])) {
@@ -417,8 +433,12 @@ class ArticleImporter {
         // Apply defaults for missing properties by injecting into frontmatter
         $content = $this->applyDefaults($content);
 
-        // Publish the article
-        $res = $this->processor->process($content, [], pathinfo($base, PATHINFO_FILENAME));
+        // Process, deferring scheduling: the source file is kept and re-scanned
+        // until its publish time comes, then it is published for real.
+        $cleanBase = preg_replace('/\.pending$/', '', $base);
+        $res = $this->processor->process(
+            $content, [], pathinfo($cleanBase, PATHINFO_FILENAME), true
+        );
 
         if ($res === false) {
             $result['message'] = 'Processing failed.';
@@ -437,11 +457,18 @@ class ArticleImporter {
 
         if (!empty($res['scheduled'])) {
             // Future-dated article: keep the source in the import folder as
-            // a pending file (never move it to "done" before its time).
-            if (!$this->markPending($file, $result['message'])) {
+            // a pending file (never move it to "done" before its time). The
+            // images are already imported, move their sources out of the way.
+            $this->moveSourceImages($this->doneSubdir);
+            if (!$isPending && !$this->markPending($file, $result['message'])) {
                 $result['warning'] = 'Cannot keep the scheduled file in the import folder.';
             }
             return $result;
+        }
+
+        // Due: a pending file is renamed back to its normal name, then archived.
+        if ($isPending) {
+            $file = $this->stripPendingSuffix($file);
         }
 
         if (!$this->archiveSource($file, $this->doneSubdir, $result['message'])) {
@@ -484,11 +511,11 @@ class ArticleImporter {
      * @return bool True if the file was kept in the import folder as pending
      */
     public function markPending($file, $note = '') {
-        if ($this->archiveInPlace($file, 'pending', $note)) {
-            return true;
-        }
-        error_log(__METHOD__ . ': cannot keep ' . $file . ' pending in the import folder');
-        return false;
+        //if ($this->archiveInPlace($file, 'pending', $note)) {
+        return true;
+        //}
+        //error_log(__METHOD__ . ': cannot keep ' . $file . ' pending in the import folder');
+        //return false;
     }
 
     /**
@@ -530,77 +557,186 @@ class ArticleImporter {
     }
 
     /**
-     * Imports images that sit next to a Markdown file, KEEPING their
-     * original file names. Looks for:
-     * - files with the same basename (article.jpg, article.png ...)
-     * - a sibling folder named like the basename or "images"
-     * - images referenced in the markdown that are present in the folder
+     * Returns every image file found in the import folder, recursively,
+     * skipping the done/ and failed/ subfolders and hidden directories.
      *
-     * If any image name is already in use in the FlatPress images folder
-     * the import fails for that image (ideally the caller treats it as a
-     * failed article import).
+     * @return array List of absolute image file paths
+     */
+    public function findFolderImages() {
+        $dir = rtrim($this->importDir, '/\\');
+        if (!is_dir($dir)) {
+            return [];
+        }
+
+        $exts = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'];
+        $found = [];
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::LEAVES_ONLY
+        );
+
+        foreach ($iterator as $f) {
+            if (!$f->isFile()) {
+                continue;
+            }
+            $path = $f->getPathname();
+            $rel = ltrim(str_replace($dir, '', $path), '/\\');
+            $parts = preg_split('#[\\\\/]#', $rel);
+            if (count($parts) > 1) {
+                $top = $parts[0];
+                if ($top === '' || $top[0] === '.'
+                    || strcasecmp($top, $this->doneSubdir) === 0
+                    || strcasecmp($top, $this->failedSubdir) === 0) {
+                    continue;
+                }
+            }
+            $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            if (in_array($ext, $exts)) {
+                $found[] = $path;
+            }
+        }
+
+        sort($found);
+        return $found;
+    }
+
+    /**
+     * Imports EVERY image found in the import folder into the FlatPress
+     * images directory, KEEPING the original file names.
      *
-     * @param string $markdownFile Absolute path to the .md file
+     * Nothing is copied when a name is already in use (in the images
+     * folder or duplicated inside the import folder): the caller treats
+     * that as a failure for the article being imported.
+     *
      * @return array ['ok' => [imported relative paths], 'errors' => [name => reason]]
      */
-    public function importSiblingImages($markdownFile) {
-        $dir = dirname($markdownFile);
-        $base = pathinfo($markdownFile, PATHINFO_FILENAME);
-        $images = [];
-        $errors = [];
-        $uploader = $this->processor->getImageUploader();
-        $handled = [];
+    public function importFolderImages() {
+        $result = ['ok' => [], 'errors' => []];
+        $images = $this->findFolderImages();
+        if (empty($images)) {
+            return $result;
+        }
 
-        $import = function ($src) use (&$images, &$errors, &$handled, $uploader) {
-            if (!is_file($src)) {
-                return;
-            }
+        $uploader = $this->processor->getImageUploader();
+        $imagesDir = rtrim($uploader->getImagesDir(), '/\\');
+
+        // First pass: fail early without copying anything on a name clash.
+        // An already-imported image with the SAME content is not a clash.
+        $seen = [];
+        foreach ($images as $src) {
             $name = basename($src);
-            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
-            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
-                return;
+            if (isset($seen[$name])) {
+                $result['errors'][$name] = 'duplicate image name in the import folder';
+                continue;
             }
-            if (isset($handled[$name])) {
-                return;
+            $seen[$name] = true;
+            $dest = $imagesDir . '/' . $name;
+            if (file_exists($dest) && !$this->sameContent($src, $dest)) {
+                $result['errors'][$name] = 'name already in use in the images folder';
             }
-            $handled[$name] = true;
+        }
+        if (!empty($result['errors'])) {
+            return $result;
+        }
+
+        // Second pass: import everything (names are free or identical)
+        foreach ($images as $src) {
+            $name = basename($src);
+            $rel = 'images/' . $name;
+            if (file_exists($imagesDir . '/' . $name)) {
+                // Identical image already imported: just report it
+                if (!in_array($rel, $result['ok'], true)) {
+                    $result['ok'][] = $rel;
+                }
+                continue;
+            }
             $res = $uploader->importLocalKeepName($src);
             if ($res['ok']) {
-                $images[] = $res['rel'];
+                if (!in_array($res['rel'], $result['ok'], true)) {
+                    $result['ok'][] = $res['rel'];
+                }
             } else {
-                $errors[$name] = $res['reason'];
+                $result['errors'][$name] = $res['reason'];
             }
-        };
-
-        // 1) Same base name images: article.jpg, article.png ...
-        foreach (glob($dir . '/' . $base . '.*') ?: [] as $f) {
-            $import($f);
         }
 
-        // 2) Sibling folders: <base>/ or images/
-        foreach (['images', $base] as $sub) {
-            $subDir = $dir . '/' . $sub;
-            if (is_dir($subDir)) {
-                foreach (glob($subDir . '/*.{jpg,jpeg,png,gif,webp,svg,bmp}', GLOB_BRACE) ?: [] as $f) {
-                    $import($f);
+        return $result;
+    }
+
+    /**
+     * Returns true when two files exist and have identical content.
+     *
+     * @param string $a
+     * @param string $b
+     * @return bool
+     */
+    private function sameContent($a, $b) {
+        if (!is_file($a) || !is_file($b)) {
+            return false;
+        }
+        if (filesize($a) !== filesize($b)) {
+            return false;
+        }
+        return md5_file($a) === md5_file($b);
+    }
+
+    /**
+     * Moves every source image of the import folder into a subfolder
+     * (done/ or failed/), so imported images do not linger in the import
+     * folder. Best-effort: failures are logged, not fatal.
+     *
+     * @param string $subdir done|failed
+     */
+    public function moveSourceImages($subdir) {
+        $images = $this->findFolderImages();
+        if (empty($images)) {
+            return;
+        }
+
+        $destDir = rtrim($this->importDir, '/\\') . '/' . trim($subdir, '/\\');
+        if (!is_dir($destDir)) {
+            if (!mkdir($destDir, 0755, true)) {
+                error_log(__METHOD__ . ': cannot create ' . $destDir);
+                return;
+            }
+        }
+
+        foreach ($images as $src) {
+            $dest = $destDir . '/' . basename($src);
+            if (file_exists($dest)) {
+                $dest = $destDir . '/' . time() . '-' . basename($src);
+            }
+            if (!@rename($src, $dest)) {
+                if (@copy($src, $dest)) {
+                    @unlink($src);
+                } else {
+                    error_log(__METHOD__ . ': cannot move image ' . $src . ' to ' . $dest);
                 }
             }
         }
+    }
 
-        // 3) Images directly referenced in the markdown file if present in $dir
-        $content = @file_get_contents($markdownFile);
-        if ($content !== false) {
-            $referenced = $uploader->scanMarkdownImages($content);
-            foreach ($referenced as $ref) {
-                $refBase = basename($ref);
-                $refFile = $dir . '/' . $refBase;
-                if (is_file($refFile)) {
-                    $import($refFile);
-                }
-            }
+    /**
+     * Removes the ".pending" suffix from a file name, renaming it in place
+     * so the file can be archived with its normal name.
+     *
+     * @param string $file Absolute path
+     * @return string The clean path (or the original on failure/clash)
+     */
+    private function stripPendingSuffix($file) {
+        if (substr($file, -8) !== '.pending') {
+            return $file;
         }
-
-        return ['ok' => $images, 'errors' => $errors];
+        $clean = substr($file, 0, -8);
+        if ($clean === '' || file_exists($clean)) {
+            return $file;
+        }
+        if (@rename($file, $clean)) {
+            @unlink($file . '.note');
+            return $clean;
+        }
+        return $file;
     }
 
     /**
@@ -702,27 +838,9 @@ class ArticleImporter {
             @chmod($target . '.note', 0644);
         }
 
-        // Also move any sibling images with matching base name
+        // Also move every source image of the folder out of the import dir
         if ($success) {
-            $dir = dirname($file);
-            $base = pathinfo($file, PATHINFO_FILENAME);
-            foreach (glob($dir . '/' . $base . '.*') ?: [] as $f) {
-                if ($f === $file || !is_file($f)) {
-                    continue;
-                }
-                $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
-                if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
-                    $imgTarget = $targetDir . basename($f);
-                    if (file_exists($imgTarget)) {
-                        $imgTarget = $targetDir . time() . '-' . basename($f);
-                    }
-                    if (!@rename($f, $imgTarget)) {
-                        if (@copy($f, $imgTarget)) {
-                            @unlink($f);
-                        }
-                    }
-                }
-            }
+            $this->moveSourceImages($subdir);
         }
 
         return $success;

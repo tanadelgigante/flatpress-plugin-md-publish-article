@@ -52,12 +52,16 @@ class ArticleProcessor {
      * @param string $rawMarkdown Full markdown text with frontmatter
      * @param array $files Optional $_FILES array (name => file array)
      * @param string $imagesPrefix Prefix for uploaded files (e.g. entry ID)
+     * @param bool $deferScheduling When true, a future-dated article is NOT
+     *              written to the pending directory: the caller takes care of
+     *              keeping the source file (used by the folder importer, which
+     *              re-scans the source until its time comes).
      * @return array|false Result array on success:
      *                     ['id' => entryID, 'scheduled' => false|int timestamp,
      *                      'images' => [uploaded relative paths]]
      *                     false on failure
      */
-    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '', $deferScheduling = false) {
         $parsed = $this->parser->parseMarkdown($rawMarkdown);
         $properties = $parsed['properties'];
         $content = $parsed['content'];
@@ -93,7 +97,13 @@ class ArticleProcessor {
         $serialized = $this->composer->buildEntryString($entry);
 
         if ($scheduleTs !== null) {
-            // SCHEDULED: store in the pending directory
+            // SCHEDULED
+            if ($deferScheduling) {
+                // The caller keeps the source file and re-imports it when due;
+                // do NOT write a pending entry (would cause a duplicate).
+                return ['id' => $id, 'scheduled' => $scheduleTs, 'images' => $uploaded];
+            }
+            // Store in the pending directory
             $ok = $this->writer->savePendingEntry($id, $scheduleTs, $serialized);
             return $ok
                 ? ['id' => $id, 'scheduled' => $scheduleTs, 'images' => $uploaded]
