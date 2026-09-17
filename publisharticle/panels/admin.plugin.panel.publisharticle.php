@@ -138,7 +138,8 @@ if (class_exists('AdminPanelAction')) {
 					for ($i = 0; $i < $count; $i++) {
 						if ($_FILES['images']['error'][$i] === UPLOAD_ERR_OK) {
 							$imgName = basename($_FILES['images']['name'][$i]);
-							move_uploaded_file($_FILES['images']['tmp_name'][$i], rtrim($importDir, '/\\') . '/' . $imgName);
+							$safeImgName = preg_replace('/[^a-zA-Z0-9_.\-]/', '_', $imgName);
+							move_uploaded_file($_FILES['images']['tmp_name'][$i], rtrim($importDir, '/\\') . '/' . $safeImgName);
 						}
 					}
 				}
