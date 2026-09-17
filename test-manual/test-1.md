@@ -8,4 +8,4 @@ publish_date:
 Sto testando un nuovo modo di pubblicare su **Flatpress**.
 Vediamo se funziona
 
-![Fotina](plugin.png width=500)
+![Fotina](plugin.png width=500) d
