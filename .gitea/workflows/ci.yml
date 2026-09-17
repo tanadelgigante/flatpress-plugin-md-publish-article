@@ -294,7 +294,7 @@ jobs:
           if [ -n "$PROCESS_OWNER" ]; then
             USER_FLAG="--user $PROCESS_OWNER"
           fi
-          echo "Testbed user flag:${USER_FLAG}"
+          echo "Testbed user flag:${USER_FLAG}"  
 
           for i in 1 2 3 4 5; do
             if docker run --pull=always -d \
