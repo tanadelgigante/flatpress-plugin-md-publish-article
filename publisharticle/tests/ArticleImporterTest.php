@@ -271,7 +271,7 @@ class ArticleImporterTest extends TestCase {
 
     // ── importFile: scheduled articles stay in the import folder ──
 
-    public function testImportFileKeepsScheduledArticlePendingInImportFolder(): void {
+    public function testImportFileLeavesScheduledArticleInImportFolder(): void {
         $tmp = self::TMP_DIR . '/';
         file_put_contents($tmp . 'later.md', "---\ntitle: Later\n---\nBody");
 
@@ -283,68 +283,36 @@ class ArticleImporterTest extends TestCase {
         $this->assertStringContainsString('Scheduled', $result['message']);
         // The importer must ask the processor to defer scheduling
         $this->assertTrue($processor->lastDefer);
-        // The source stays in the import folder, marked as pending
-        //$this->assertFileExists($tmp . 'later.md.pending');
-        //$this->assertFileDoesNotExist($tmp . 'later.md');
-        // It must NOT be moved to done/ before its scheduled time
-        //$this->assertFileDoesNotExist($tmp . 'done/later.md');
-        // The pending file is re-scanned (so it can be published when due)
-        //$files = $importer->scan();
-        //$this->assertContains($tmp . 'later.md.pending', $files);
-        // ...but it is not re-pending itself on a later run
-        //$importer->importFile($tmp . 'later.md.pending');
-        //$this->assertFileExists($tmp . 'later.md.pending');
-        //$this->assertFileDoesNotExist($tmp . 'later.md.pending.pending');
+        // The source stays untouched in the import folder...
+        $this->assertFileExists($tmp . 'later.md');
+        // ...and is NOT moved to done/ before its scheduled time
+        $this->assertFileDoesNotExist($tmp . 'done/later.md');
+        // It is re-scanned, so it can be published once due
+        $this->assertContains($tmp . 'later.md', $importer->scan());
+        // Re-running is idempotent: no renamed/duplicated leftovers
+        $importer->importFile($tmp . 'later.md');
+        $this->assertFileExists($tmp . 'later.md');
+        $this->assertSame([$tmp . 'later.md'], $importer->scan());
     }
 
-    public function testImportFilePublishesPendingFileWhenDue(): void {
-        $tmp = self::TMP_DIR . '/';
-        // A pending file whose scheduled time has already passed: process()
-        // no longer sees a future date, so it is published and archived.
-        file_put_contents($tmp . 'later.md.pending', "---\ntitle: Later\n---\nBody");
-        file_put_contents($tmp . 'later.md.pending.note', 'Scheduled for ...');
-
-        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
-        $result = $importer->importFile($tmp . 'later.md.pending');
-
-        $this->assertTrue($result['success']);
-        $this->assertStringNotContainsString('Scheduled', $result['message']);
-        $this->assertFileDoesNotExist($tmp . 'later.md.pending');
-        $this->assertFileDoesNotExist($tmp . 'later.md.pending.note');
-        $this->assertFileExists($tmp . 'done/later.md');
-        $this->assertSame([], $importer->scan());
-    }
-
-    public function testScanFindsPendingFiles(): void {
-        file_put_contents(self::TMP_DIR . '/a.md', 'a');
-        file_put_contents(self::TMP_DIR . '/b.md.pending', 'b');
-        file_put_contents(self::TMP_DIR . '/b.md.pending.note', 'note');
-
-        $importer = new ArticleImporter(null, self::TMP_DIR . '/', []);
-        $files = $importer->scan();
-
-        $this->assertCount(2, $files);
-        $this->assertContains(self::TMP_DIR . '/b.md.pending', $files);
-    }
-
-    public function testPendingArticleImportsImagesAddedLater(): void {
+    public function testScheduledArticleImportsImagesAddedLater(): void {
         $tmp = self::TMP_DIR . '/';
         $imagesDir = rtrim(IMAGES_DIR, '/');
         $imgName = 'late-image.png';
         @unlink($imagesDir . '/' . $imgName);
 
-        // The article is already pending; the image is dropped afterwards.
-        file_put_contents($tmp . 'later.md.pending', "---\ntitle: Later\n---\nBody");
+        // The article is still scheduled; the image is dropped afterwards.
+        file_put_contents($tmp . 'later.md', "---\ntitle: Later\n---\nBody");
         file_put_contents($tmp . $imgName, 'PNG DATA');
 
         $importer = new ArticleImporter(new FakeScheduledProcessor(), $tmp, []);
-        $result = $importer->importFile($tmp . 'later.md.pending');
+        $result = $importer->importFile($tmp . 'later.md');
 
         $this->assertTrue($result['success']);
         $this->assertContains('images/' . $imgName, $result['images']);
         $this->assertFileExists($imagesDir . '/' . $imgName);
-        // The article stays pending, the image source leaves the import folder
-        $this->assertFileExists($tmp . 'later.md.pending');
+        // The article stays in the import folder, the image source leaves it
+        $this->assertFileExists($tmp . 'later.md');
         $this->assertFileExists($tmp . 'done/' . $imgName);
         $this->assertFileDoesNotExist($tmp . $imgName);
     }
