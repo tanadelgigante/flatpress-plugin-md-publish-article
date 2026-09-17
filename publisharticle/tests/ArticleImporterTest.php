@@ -11,17 +11,31 @@ class ArticleImporterTest extends TestCase {
 
     private const TMP_DIR = __DIR__ . '/fixtures/tmp';
 
+    /** @var string[] Images present in the shared fixture dir before the test */
+    private $imagesSnapshot = [];
+
     protected function setUp(): void {
         // Clean and recreate the temp fixture dir
         if (is_dir(self::TMP_DIR)) {
             $this->rrmdir(self::TMP_DIR);
         }
         mkdir(self::TMP_DIR, 0777, true);
+
+        if (!is_dir(IMAGES_DIR)) {
+            mkdir(IMAGES_DIR, 0777, true);
+        }
+        $this->imagesSnapshot = glob(IMAGES_DIR . '*') ?: [];
     }
 
     protected function tearDown(): void {
         if (is_dir(self::TMP_DIR)) {
             $this->rrmdir(self::TMP_DIR);
+        }
+        // Remove any image copied into the shared fixture dir by the test
+        foreach (glob(IMAGES_DIR . '*') ?: [] as $f) {
+            if (!in_array($f, $this->imagesSnapshot, true)) {
+                @unlink($f);
+            }
         }
     }
 
@@ -255,6 +269,70 @@ class ArticleImporterTest extends TestCase {
         $this->assertSame([], $importer->scan());
     }
 
+    // ── importFile: scheduled articles stay in the import folder ──
+
+    public function testImportFileKeepsScheduledArticlePendingInImportFolder(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'later.md', "---\ntitle: Later\n---\nBody");
+
+        $importer = new ArticleImporter(new FakeScheduledProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'later.md');
+
+        $this->assertTrue($result['success']);
+        $this->assertStringContainsString('Scheduled', $result['message']);
+        // The source stays in the import folder, marked as pending
+        $this->assertFileExists($tmp . 'later.md.pending');
+        $this->assertFileDoesNotExist($tmp . 'later.md');
+        // It must NOT be moved to done/ before its scheduled time
+        $this->assertFileDoesNotExist($tmp . 'done/later.md');
+        // And it must never be picked up again by scan()
+        $this->assertSame([], $importer->scan());
+    }
+
+    // ── importFile: images keep their original names ───────────────
+
+    public function testImportFileImportsImageWithOriginalName(): void {
+        $tmp = self::TMP_DIR . '/';
+        $imagesDir = rtrim(IMAGES_DIR, '/');
+        $imgName = 'original-name.png';
+        @unlink($imagesDir . '/' . $imgName);
+
+        file_put_contents($tmp . 'post.md', "---\ntitle: Post\n---\n![pic](original-name.png)");
+        file_put_contents($tmp . $imgName, 'PNG DATA');
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        $this->assertTrue($result['success']);
+        $this->assertContains('images/' . $imgName, $result['images']);
+        $this->assertFileExists($imagesDir . '/' . $imgName);
+        $this->assertSame('PNG DATA', file_get_contents($imagesDir . '/' . $imgName));
+        $this->assertFileExists($tmp . 'done/post.md');
+    }
+
+    public function testImportFileFailsWhenImageNameAlreadyUsed(): void {
+        $tmp = self::TMP_DIR . '/';
+        $imagesDir = rtrim(IMAGES_DIR, '/');
+        $imgName = 'collision-test.png';
+        file_put_contents($imagesDir . '/' . $imgName, 'PRE-EXISTING');
+
+        file_put_contents($tmp . 'post.md', "---\ntitle: Post\n---\n![pic](collision-test.png)");
+        file_put_contents($tmp . $imgName, 'NEW IMAGE');
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        $this->assertFalse($result['success']);
+        $this->assertArrayHasKey($imgName, $result['image_errors']);
+        $this->assertStringContainsString($imgName, $result['message']);
+        // Article routed to failed/, never to done/
+        $this->assertFileDoesNotExist($tmp . 'post.md');
+        $this->assertFileExists($tmp . 'failed/post.md');
+        $this->assertFileDoesNotExist($tmp . 'done/post.md');
+        // The pre-existing image must not have been overwritten
+        $this->assertSame('PRE-EXISTING', file_get_contents($imagesDir . '/' . $imgName));
+    }
+
     public function testImportFileWarnsWhenNothingCanBeMoved(): void {
         $tmp = self::TMP_DIR . '/';
         file_put_contents($tmp . 'post.md', "---\ntitle: Test\n---\nBody");
@@ -334,6 +412,19 @@ class FakeSuccessProcessor {
 class FakeFailingProcessor {
     public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
         return false;
+    }
+
+    public function getImageUploader() {
+        return new ImageUploader();
+    }
+}
+
+/**
+ * Stub processor that reports a future-scheduled publication.
+ */
+class FakeScheduledProcessor {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+        return ['id' => 'entry260915-130000', 'scheduled' => time() + 86400, 'images' => []];
     }
 
     public function getImageUploader() {

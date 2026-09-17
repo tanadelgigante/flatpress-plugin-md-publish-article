@@ -142,6 +142,45 @@ class ImageUploader {
     }
 
     /**
+     * Imports a LOCAL image file into the FlatPress images directory
+     * KEEPING its original file name, so references in the Markdown keep
+     * working. Reserved for the folder importer.
+     *
+     * @param string $sourcePath Absolute/relative filesystem path of the image
+     * @return array ['ok' => bool, 'rel' => string, 'reason' => string]
+     *               'rel' = 'images/<name>' when ok; 'reason' explains failures
+     */
+    public function importLocalKeepName($sourcePath) {
+        if (!is_file($sourcePath)) {
+            return ['ok' => false, 'rel' => '', 'reason' => 'file not found'];
+        }
+
+        $name = basename($sourcePath);
+        $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+        if (!in_array($ext, $this->allowedExtensions)) {
+            return ['ok' => false, 'rel' => '', 'reason' => 'extension not allowed'];
+        }
+
+        $dir = $this->getImagesDir();
+        if (!is_dir($dir)) {
+            if (!mkdir($dir, 0755, true)) {
+                return ['ok' => false, 'rel' => '', 'reason' => 'images dir not creatable'];
+            }
+        }
+
+        $dest = $dir . '/' . $name;
+        if (file_exists($dest)) {
+            return ['ok' => false, 'rel' => '', 'reason' => 'name already in use'];
+        }
+
+        if (!copy($sourcePath, $dest)) {
+            return ['ok' => false, 'rel' => '', 'reason' => 'copy failed'];
+        }
+
+        return ['ok' => true, 'rel' => 'images/' . $name, 'reason' => ''];
+    }
+
+    /**
      * Scans the Markdown body for image references (![...](path ...)) and
      * reports which referenced paths are NOT already inside the images dir.
      * Used to detect local images that need uploading.

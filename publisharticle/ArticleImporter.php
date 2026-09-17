@@ -397,8 +397,22 @@ class ArticleImporter {
             return $result;
         }
 
-        // Import sibling images: same basename or images/ subfolder next to the markdown file
-        $images = $this->importSiblingImages($file);
+        // Import sibling images KEEPING their original names: a name clash
+        // with the FlatPress images folder fails the whole article import.
+        $imgRes = $this->importSiblingImages($file);
+        $images = $imgRes['ok'];
+
+        if (!empty($imgRes['errors'])) {
+            $result['message'] = 'Image import failed: '
+                . implode(', ', array_map(function ($name) use ($imgRes) {
+                    return $name . ' (' . $imgRes['errors'][$name] . ')';
+                }, array_keys($imgRes['errors'])));
+            $result['image_errors'] = $imgRes['errors'];
+            if (!$this->archiveSource($file, $this->failedSubdir, $result['message'])) {
+                $result['warning'] = 'Cannot move file out of the import folder.';
+            }
+            return $result;
+        }
 
         // Apply defaults for missing properties by injecting into frontmatter
         $content = $this->applyDefaults($content);
@@ -420,6 +434,15 @@ class ArticleImporter {
         $result['message'] = $res['scheduled']
             ? 'Scheduled for ' . date('Y-m-d H:i:s', $res['scheduled'])
             : 'Published';
+
+        if (!empty($res['scheduled'])) {
+            // Future-dated article: keep the source in the import folder as
+            // a pending file (never move it to "done" before its time).
+            if (!$this->markPending($file, $result['message'])) {
+                $result['warning'] = 'Cannot keep the scheduled file in the import folder.';
+            }
+            return $result;
+        }
 
         if (!$this->archiveSource($file, $this->doneSubdir, $result['message'])) {
             $result['warning'] = 'Cannot move file out of the import folder.';
@@ -445,21 +468,52 @@ class ArticleImporter {
         if ($this->moveTo($file, $subdir, $note)) {
             return true;
         }
+        error_log(__METHOD__ . ': moveTo() failed for ' . $file
+            . '; archiving in place instead');
+        return $this->archiveInPlace($file, $subdir, $note);
+    }
 
-        $marker = $file . '.' . $subdir;
+    /**
+     * Marks a future-dated (scheduled) article as pending, KEEPING it in
+     * the import folder: the file is renamed in place with a ".pending"
+     * suffix so that scan() does not pick it up again, but it is never
+     * moved to "done" before its scheduled time.
+     *
+     * @param string $file Absolute path of the source .md file
+     * @param string $note Optional note (e.g. scheduled date)
+     * @return bool True if the file was kept in the import folder as pending
+     */
+    public function markPending($file, $note = '') {
+        if ($this->archiveInPlace($file, 'pending', $note)) {
+            return true;
+        }
+        error_log(__METHOD__ . ': cannot keep ' . $file . ' pending in the import folder');
+        return false;
+    }
+
+    /**
+     * Renames a file in place with a suffix (".done", ".failed", ".pending")
+     * inside the import folder, so it no longer matches scan()'s glob.
+     *
+     * @param string $file Absolute path of the source .md file
+     * @param string $suffix done|failed|pending
+     * @param string $note Optional note file content
+     * @return bool True on success
+     */
+    private function archiveInPlace($file, $suffix, $note = '') {
+        $marker = $file . '.' . $suffix;
         if (file_exists($marker)) {
             $marker .= '.' . time();
         }
-        if (@rename($file, $marker)) {
-            @file_put_contents($marker . '.note', $note);
-            error_log(__METHOD__ . ': moveTo() failed for ' . $file
-                . '; archived in place as ' . $marker);
-            return true;
+        if (!@rename($file, $marker)) {
+            error_log(__METHOD__ . ': cannot archive ' . $file . ' in place ('
+                . $marker . ') — import dir not writable?');
+            return false;
         }
-
-        error_log(__METHOD__ . ': cannot archive ' . $file . ' in place ('
-            . $marker . ') — import dir not writable?');
-        return false;
+        if ($note !== '') {
+            @file_put_contents($marker . '.note', $note);
+        }
+        return true;
     }
 
     /**
@@ -476,29 +530,51 @@ class ArticleImporter {
     }
 
     /**
-     * Imports images that sit next to a Markdown file.
-     * Looks for:
+     * Imports images that sit next to a Markdown file, KEEPING their
+     * original file names. Looks for:
      * - files with the same basename (article.jpg, article.png ...)
      * - a sibling folder named like the basename or "images"
      * - images referenced in the markdown that are present in the folder
      *
+     * If any image name is already in use in the FlatPress images folder
+     * the import fails for that image (ideally the caller treats it as a
+     * failed article import).
+     *
      * @param string $markdownFile Absolute path to the .md file
-     * @return array List of imported relative paths (images/...)
+     * @return array ['ok' => [imported relative paths], 'errors' => [name => reason]]
      */
     public function importSiblingImages($markdownFile) {
         $dir = dirname($markdownFile);
         $base = pathinfo($markdownFile, PATHINFO_FILENAME);
-        $imported = [];
+        $images = [];
+        $errors = [];
+        $uploader = $this->processor->getImageUploader();
+        $handled = [];
+
+        $import = function ($src) use (&$images, &$errors, &$handled, $uploader) {
+            if (!is_file($src)) {
+                return;
+            }
+            $name = basename($src);
+            $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
+                return;
+            }
+            if (isset($handled[$name])) {
+                return;
+            }
+            $handled[$name] = true;
+            $res = $uploader->importLocalKeepName($src);
+            if ($res['ok']) {
+                $images[] = $res['rel'];
+            } else {
+                $errors[$name] = $res['reason'];
+            }
+        };
 
         // 1) Same base name images: article.jpg, article.png ...
         foreach (glob($dir . '/' . $base . '.*') ?: [] as $f) {
-            $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
-            if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
-                $rel = $this->processor->getImageUploader()->importLocal($f, $base);
-                if ($rel !== false && !in_array($rel, $imported)) {
-                    $imported[] = $rel;
-                }
-            }
+            $import($f);
         }
 
         // 2) Sibling folders: <base>/ or images/
@@ -506,10 +582,7 @@ class ArticleImporter {
             $subDir = $dir . '/' . $sub;
             if (is_dir($subDir)) {
                 foreach (glob($subDir . '/*.{jpg,jpeg,png,gif,webp,svg,bmp}', GLOB_BRACE) ?: [] as $f) {
-                    $rel = $this->processor->getImageUploader()->importLocal($f, $base);
-                    if ($rel !== false && !in_array($rel, $imported)) {
-                        $imported[] = $rel;
-                    }
+                    $import($f);
                 }
             }
         }
@@ -517,20 +590,17 @@ class ArticleImporter {
         // 3) Images directly referenced in the markdown file if present in $dir
         $content = @file_get_contents($markdownFile);
         if ($content !== false) {
-            $referenced = $this->processor->getImageUploader()->scanMarkdownImages($content);
+            $referenced = $uploader->scanMarkdownImages($content);
             foreach ($referenced as $ref) {
                 $refBase = basename($ref);
                 $refFile = $dir . '/' . $refBase;
                 if (is_file($refFile)) {
-                    $rel = $this->processor->getImageUploader()->importLocal($refFile, $base);
-                    if ($rel !== false && !in_array($rel, $imported)) {
-                        $imported[] = $rel;
-                    }
+                    $import($refFile);
                 }
             }
         }
 
-        return $imported;
+        return ['ok' => $images, 'errors' => $errors];
     }
 
     /**
