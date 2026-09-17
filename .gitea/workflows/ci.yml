@@ -294,25 +294,11 @@ jobs:
           done <<< "$HOSTS"
           echo "Testbed add-host flags:${ADD_HOST_FLAGS}"
 
-          [ -n "$PROCESS_OWNER" ] && echo "PROCESS_OWNER=$PROCESS_OWNER"
-          if [ -n "$PROCESS_OWNER" ]; then
-            case "$PROCESS_OWNER" in
-              *:*)
-                PUID="${PROCESS_OWNER%%:*}"
-                PGID="${PROCESS_OWNER##*:}"
-                case "$PUID:$PGID" in
-                  *[!0-9]*)
-                    echo "::warning::PROCESS_OWNER must be numeric uid:gid (got '$PROCESS_OWNER'; ignored)"
-                    ;;
-                  *)
-                    USER_ENV_FLAGS="-e PUID=$PUID -e PGID=$PGID"
-                    ;;
-                esac
-                ;;
-              *)
-                echo "::warning::PROCESS_OWNER must be 'uid:gid' (got '$PROCESS_OWNER'; ignored)"
-                ;;
-            esac
+          USER_ENV_FLAGS=""
+          if [[ "$PROCESS_OWNER" =~ ^[0-9]+:[0-9]+$ ]]; then
+            USER_ENV_FLAGS="-e PUID=${PROCESS_OWNER%%:*} -e PGID=${PROCESS_OWNER##*:}"
+          else
+            echo "::warning::PROCESS_OWNER must be numeric uid:gid (got '${PROCESS_OWNER:-<unset>}'; ignored)"
           fi
           echo "Testbed user env flags:${USER_ENV_FLAGS}"
 
