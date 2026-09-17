@@ -118,17 +118,25 @@ if (class_exists('AdminPanelAction')) {
 			$composer = new ArticleComposer();
 			$scheduleTs = $composer->extractScheduleDate($parsed['properties'], time());
 			$publishNow = isset($_POST['publish_now']) && $_POST['publish_now'] === 'on';
+			$isDraft    = isset($_POST['publisharticle-draft']);
 
-			if (!$publishNow && $scheduleTs !== null) {
+			if (!$isDraft && !$publishNow && $scheduleTs !== null) {
 				$options = plugin_getoptions('publisharticle');
-				$importDir = !empty($options['import_folder']) ? $options['import_folder'] : (defined('CONTENT_DIR') ? CONTENT_DIR . 'import-in/' : 'fp-content/content/import-in/');
-				
-				if (!is_dir($importDir)) {
-					mkdir($importDir, 0755, true);
+				if (!is_array($options)) {
+					$options = array();
 				}
+				$importer = new ArticleImporter(null, !empty($options['import_folder']) ? $options['import_folder'] : null, $options);
+				$importDir = $importer->getImportDir();
+				$importer->ensureImportDir();
 
-				$destMd = rtrim($importDir, '/\\') . '/' . $origName;
-				move_uploaded_file($tmpMd, $destMd);
+				$destMd = $importDir . $origName;
+				if (!@move_uploaded_file($tmpMd, $destMd)) {
+					if (!@copy($tmpMd, $destMd)) {
+						$this->smarty->assign('success', -1);
+						return;
+					}
+					@unlink($tmpMd);
+				}
 
 				if (
 					isset($_FILES['images']) &&
@@ -139,7 +147,12 @@ if (class_exists('AdminPanelAction')) {
 						if ($_FILES['images']['error'][$i] === UPLOAD_ERR_OK) {
 							$imgName = basename($_FILES['images']['name'][$i]);
 							$safeImgName = preg_replace('/[^a-zA-Z0-9_.\-]/', '_', $imgName);
-							move_uploaded_file($_FILES['images']['tmp_name'][$i], rtrim($importDir, '/\\') . '/' . $safeImgName);
+							$destImg = $importDir . $safeImgName;
+							if (!@move_uploaded_file($_FILES['images']['tmp_name'][$i], $destImg)) {
+								if (@copy($_FILES['images']['tmp_name'][$i], $destImg)) {
+									@unlink($_FILES['images']['tmp_name'][$i]);
+								}
+							}
 						}
 					}
 				}
@@ -150,8 +163,7 @@ if (class_exists('AdminPanelAction')) {
 
 			// ── Status & date ──
 
-			$isDraft = isset($_POST['publisharticle-draft']);
-			$status  = $isDraft ? 'draft' : 'publish';
+			$status = $isDraft ? 'draft' : 'publish';
 
 
 			// ── Upload images (original name, sanitized) ──
@@ -261,18 +273,15 @@ if (class_exists('AdminPanelAction')) {
 				$options = array();
 			}
 
-			$importDir = !empty($options['import_folder'])
-				? $options['import_folder']
-				: '';
+			$importer = new ArticleImporter(
+				null, !empty($options['import_folder']) ? $options['import_folder'] : null, $options
+			);
+			$importDir = $importer->getImportDir();
 
-			if ($importDir === '' || !is_dir($importDir)) {
+			if (!is_dir($importDir)) {
 				$this->smarty->assign('success', -1);
 				return;
 			}
-
-			$importer = new ArticleImporter(
-				null, $importDir, $options
-			);
 
 			$results = $importer->importAll();
 			$ok   = 0;
@@ -353,19 +362,16 @@ if (class_exists('AdminPanelAction')) {
 				$options = array();
 			}
 
-			$importDir = !empty($options['import_folder'])
-				? $options['import_folder']
-				: '';
+			$importer = new ArticleImporter(
+				null, !empty($options['import_folder']) ? $options['import_folder'] : null, $options
+			);
+			$importDir = $importer->getImportDir();
 
-			if ($importDir !== '' && is_dir($importDir)) {
+			if (is_dir($importDir)) {
 
 				$this->smarty->assign(
 					'import_folder_path',
 					$importDir
-				);
-
-				$importer = new ArticleImporter(
-					null, $importDir, $options
 				);
 
 				$this->smarty->assign(
@@ -407,11 +413,12 @@ if (class_exists('AdminPanelAction')) {
 
 			$imports = array();
 
-			$importDir = isset($options['import_folder'])
-				? $options['import_folder']
-				: '';
+			$importer = new ArticleImporter(
+				null, !empty($options['import_folder']) ? $options['import_folder'] : null, $options
+			);
+			$importDir = $importer->getImportDir();
 
-			if ($importDir === '' || !is_dir($importDir)) {
+			if (!is_dir($importDir)) {
 				return $imports;
 			}
 

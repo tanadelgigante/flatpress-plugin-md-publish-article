@@ -321,7 +321,7 @@ class ArticleComposer {
 
     /**
      * Extracts the optional scheduled publish date from the frontmatter.
-     * Supported keys: publish_date, scheduled, scheduled_date
+     * Supported keys: publish_date, scheduled, scheduled_date, date
      * Returns null when no future scheduling is requested.
      *
      * @param array $properties Frontmatter properties
@@ -329,22 +329,14 @@ class ArticleComposer {
      * @return int|null UNIX timestamp if scheduling is requested, null otherwise
      */
     public function extractScheduleDate($properties, $now) {
-        $key = null;
-        foreach (['publish_date', 'scheduled', 'scheduled_date'] as $candidate) {
+        $parser = new ArticleParser();
+        foreach (['publish_date', 'scheduled', 'scheduled_date', 'date'] as $candidate) {
             if (isset($properties[$candidate]) && $properties[$candidate] !== '') {
-                $key = $candidate;
-                break;
+                $ts = $parser->parseDate($properties[$candidate]);
+                if ($ts > $now) {
+                    return $ts;
+                }
             }
-        }
-        if ($key === null) {
-            return null;
-        }
-
-        $ts = (new ArticleParser())->parseDate($properties[$key]);
-
-        // Schedule only makes sense for future dates
-        if ($ts > $now) {
-            return $ts;
         }
         return null;
     }

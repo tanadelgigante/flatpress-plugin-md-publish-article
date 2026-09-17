@@ -198,6 +198,59 @@ class ArticleComposerTest extends TestCase {
         $this->assertNotNull($ts);
     }
 
+    // ── extractScheduleDate: date: key and combinations ───────────
+
+    public function testExtractScheduleDateAcceptsDateKeyFuture(): void {
+        $future = time() + 86400;
+        $ts = $this->composer->extractScheduleDate(['date' => (string) $future], time());
+        $this->assertNotNull($ts);
+        $this->assertGreaterThan(time(), $ts);
+    }
+
+    public function testExtractScheduleDateAcceptsDateKeyIsoString(): void {
+        $future = date('Y-m-d H:i:s', time() + 86400);
+        $ts = $this->composer->extractScheduleDate(['date' => $future], time());
+        $this->assertNotNull($ts);
+        $this->assertGreaterThan(time(), $ts);
+    }
+
+    public function testExtractScheduleDateReturnsNullForPastDateKey(): void {
+        $past = time() - 86400;
+        $ts = $this->composer->extractScheduleDate(['date' => (string) $past], time());
+        $this->assertNull($ts);
+    }
+
+    public function testExtractScheduleDateUsesFutureFieldAmongCombination(): void {
+        $future = time() + 86400;
+        $past = time() - 86400;
+        // date is past, publish_date is future → returns publish_date
+        $ts = $this->composer->extractScheduleDate([
+            'date' => (string) $past,
+            'publish_date' => (string) $future,
+        ], time());
+        $this->assertNotNull($ts);
+        $this->assertSame($future, $ts);
+
+        // date is future, publish_date is past → returns date
+        $ts = $this->composer->extractScheduleDate([
+            'date' => (string) $future,
+            'publish_date' => (string) $past,
+        ], time());
+        $this->assertNotNull($ts);
+        $this->assertGreaterThan(time(), $ts);
+    }
+
+    public function testExtractScheduleDateReturnsNullWhenAllPast(): void {
+        $past = time() - 86400;
+        $ts = $this->composer->extractScheduleDate([
+            'date' => (string) $past,
+            'publish_date' => (string) $past,
+            'scheduled' => (string) $past,
+            'scheduled_date' => (string) $past,
+        ], time());
+        $this->assertNull($ts);
+    }
+
     // ── Tables ───────────────────────────────────────────────────
 
     public function testMarkdownTableBasic(): void {

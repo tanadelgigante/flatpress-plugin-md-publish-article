@@ -62,13 +62,13 @@ class ArticleProcessor {
         $properties = $parsed['properties'];
         $content = $parsed['content'];
 
+        // Check for a future scheduled publish date
+        $scheduleTs = $this->composer->extractScheduleDate($properties, time());
+
         // Resolve the ENTRY date (used for the entry ID and shown as publication date)
         $timestamp = isset($properties['date'])
             ? $this->parser->parseDate($properties['date'])
-            : time();
-
-        // Check for a future scheduled publish date
-        $scheduleTs = $this->composer->extractScheduleDate($properties, time());
+            : ($scheduleTs !== null ? $scheduleTs : time());
 
         // Translate category NAMES to numeric IDs (deferred if not resolvable)
         if (isset($properties['categories']) && $properties['categories'] !== '') {

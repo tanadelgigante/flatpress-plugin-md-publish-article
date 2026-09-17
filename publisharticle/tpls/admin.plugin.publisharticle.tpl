@@ -32,7 +32,7 @@
 	<!-- Publish now -->
 	<dt><label for="publish_now">{$plang.publish_now}</label></dt>
 	<dd>
-		<input type="checkbox" name="publish_now" id="publish_now" checked>
+		<input type="checkbox" name="publish_now" id="publish_now">
 	</dd>
 
 </dl>

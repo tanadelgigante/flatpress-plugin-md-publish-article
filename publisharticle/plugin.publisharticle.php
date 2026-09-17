@@ -330,7 +330,8 @@ function publisharticle_process_import() {
 		return;
 	}
 
-	$importer = new ArticleImporter(null, $options['import_folder'], $options);
+	$importFolder = !empty($options['import_folder']) ? $options['import_folder'] : null;
+	$importer = new ArticleImporter(null, $importFolder, $options);
 	$importer->importAll();
 
 	// Remember the last run so cron expressions only fire once per slot

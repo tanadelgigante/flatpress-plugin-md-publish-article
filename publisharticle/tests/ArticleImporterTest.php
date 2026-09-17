@@ -154,6 +154,62 @@ class ArticleImporterTest extends TestCase {
         $this->assertFileExists($tmp . 'done/x.md'); // original still there
     }
 
+    // ── moveTo: .note + sibling images ─────────────────────────────
+
+    public function testMoveToWritesNoteFile(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'x.md', 'x');
+
+        $importer = new ArticleImporter(null, $tmp, []);
+        $ok = $importer->moveTo($tmp . 'x.md', 'done', 'Import done');
+
+        $this->assertTrue($ok);
+        $this->assertFileExists($tmp . 'done/x.md');
+        $this->assertSame('Import done', file_get_contents($tmp . 'done/x.md.note'));
+    }
+
+    public function testMoveToMovesSiblingImages(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'post.md', 'x');
+        file_put_contents($tmp . 'post.jpg', 'img');
+
+        $importer = new ArticleImporter(null, $tmp, []);
+        $ok = $importer->moveTo($tmp . 'post.md', 'done');
+
+        $this->assertTrue($ok);
+        $this->assertFileExists($tmp . 'done/post.md');
+        $this->assertFileExists($tmp . 'done/post.jpg');
+        $this->assertFileDoesNotExist($tmp . 'post.jpg');
+    }
+
+    // ── importFile: done/ and failed/ routing ──────────────────────
+
+    public function testImportFileMovesToDone(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'post.md', "---\ntitle: Test\n---\nBody");
+
+        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'post.md');
+
+        $this->assertTrue($result['success']);
+        $this->assertFileDoesNotExist($tmp . 'post.md');
+        $this->assertFileExists($tmp . 'done/post.md');
+        $this->assertFileExists($tmp . 'done/post.md.note');
+    }
+
+    public function testImportFileMovesToFailed(): void {
+        $tmp = self::TMP_DIR . '/';
+        file_put_contents($tmp . 'bad.md', "---\ntitle: Bad\n---\nBody");
+
+        $importer = new ArticleImporter(new FakeFailingProcessor(), $tmp, []);
+        $result = $importer->importFile($tmp . 'bad.md');
+
+        $this->assertFalse($result['success']);
+        $this->assertFileDoesNotExist($tmp . 'bad.md');
+        $this->assertFileExists($tmp . 'failed/bad.md');
+        $this->assertFileExists($tmp . 'failed/bad.md.note');
+    }
+
     // ── constructor / directories ──────────────────────────────────
 
     public function testCustomImportDirIsUsed(): void {
@@ -164,5 +220,59 @@ class ArticleImporterTest extends TestCase {
     public function testDefaultImportDirUsesContentDirConstant(): void {
         $importer = new ArticleImporter(null, null, []);
         $this->assertStringContainsString('import-in', $importer->getImportDir());
+    }
+
+    public function testEmptyStringImportDirFallsBackToDefault(): void {
+        $importer = new ArticleImporter(null, '', []);
+        $this->assertSame($importer->getDefaultImportDir(), $importer->getImportDir());
+    }
+
+    public function testSetImportDirEmptyStringFallsBackToDefault(): void {
+        $importer = new ArticleImporter(null, null, []);
+        $importer->setImportDir('');
+        $this->assertSame($importer->getDefaultImportDir(), $importer->getImportDir());
+    }
+
+    public function testImportDirAlwaysGetsTrailingSlash(): void {
+        $importer = new ArticleImporter(null, 'custom/path', []);
+        $this->assertSame('custom/path/', $importer->getImportDir());
+
+        $importer = new ArticleImporter(null, 'custom/path/', []);
+        $this->assertSame('custom/path/', $importer->getImportDir());
+
+        $importer = new ArticleImporter(null, 'custom\\path', []);
+        $this->assertSame('custom\\path/', $importer->getImportDir());
+    }
+
+    public function testSetImportDirAlwaysGetsTrailingSlash(): void {
+        $importer = new ArticleImporter(null, null, []);
+        $importer->setImportDir('custom/path');
+        $this->assertSame('custom/path/', $importer->getImportDir());
+    }
+}
+
+/**
+ * Stub processor that reports a successful publication.
+ */
+class FakeSuccessProcessor {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+        return ['id' => 'entry260915-120000', 'scheduled' => false, 'images' => []];
+    }
+
+    public function getImageUploader() {
+        return new ImageUploader();
+    }
+}
+
+/**
+ * Stub processor that reports a processing failure.
+ */
+class FakeFailingProcessor {
+    public function process($rawMarkdown, $files = [], $imagesPrefix = '') {
+        return false;
+    }
+
+    public function getImageUploader() {
+        return new ImageUploader();
     }
 }

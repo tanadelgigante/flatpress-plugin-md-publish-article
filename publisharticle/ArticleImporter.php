@@ -51,7 +51,7 @@ class ArticleImporter {
      */
     public function __construct($processor = null, $importDir = null, $options = []) {
         $this->processor = $processor !== null ? $processor : new ArticleProcessor();
-        $this->importDir = $importDir !== null ? $importDir : $this->getDefaultImportDir();
+        $this->importDir = (!empty($importDir)) ? rtrim($importDir, '/\\') . '/' : $this->getDefaultImportDir();
 
         if (isset($options['default_category'])) {
             $this->defaultCategory = $options['default_category'];
@@ -93,7 +93,7 @@ class ArticleImporter {
      * @param string $dir Import directory
      */
     public function setImportDir($dir) {
-        $this->importDir = rtrim($dir, '/\\') . '/';
+        $this->importDir = (!empty($dir)) ? rtrim($dir, '/\\') . '/' : $this->getDefaultImportDir();
     }
 
     /**
@@ -402,7 +402,7 @@ class ArticleImporter {
 
         if ($res === false) {
             $result['message'] = 'Processing failed.';
-            $this->moveTo($file, $this->failedSubdir);
+            $this->moveTo($file, $this->failedSubdir, $result['message']);
             return $result;
         }
 
@@ -413,7 +413,7 @@ class ArticleImporter {
             ? 'Scheduled for ' . date('Y-m-d H:i:s', $res['scheduled'])
             : 'Published';
 
-        $this->moveTo($file, $this->doneSubdir);
+        $this->moveTo($file, $this->doneSubdir, $result['message']);
         return $result;
     }
 
@@ -435,6 +435,7 @@ class ArticleImporter {
      * Looks for:
      * - files with the same basename (article.jpg, article.png ...)
      * - a sibling folder named like the basename or "images"
+     * - images referenced in the markdown that are present in the folder
      *
      * @param string $markdownFile Absolute path to the .md file
      * @return array List of imported relative paths (images/...)
@@ -449,7 +450,7 @@ class ArticleImporter {
             $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
             if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
                 $rel = $this->processor->getImageUploader()->importLocal($f, $base);
-                if ($rel !== false) {
+                if ($rel !== false && !in_array($rel, $imported)) {
                     $imported[] = $rel;
                 }
             }
@@ -461,7 +462,23 @@ class ArticleImporter {
             if (is_dir($subDir)) {
                 foreach (glob($subDir . '/*.{jpg,jpeg,png,gif,webp,svg,bmp}', GLOB_BRACE) ?: [] as $f) {
                     $rel = $this->processor->getImageUploader()->importLocal($f, $base);
-                    if ($rel !== false) {
+                    if ($rel !== false && !in_array($rel, $imported)) {
+                        $imported[] = $rel;
+                    }
+                }
+            }
+        }
+
+        // 3) Images directly referenced in the markdown file if present in $dir
+        $content = @file_get_contents($markdownFile);
+        if ($content !== false) {
+            $referenced = $this->processor->getImageUploader()->scanMarkdownImages($content);
+            foreach ($referenced as $ref) {
+                $refBase = basename($ref);
+                $refFile = $dir . '/' . $refBase;
+                if (is_file($refFile)) {
+                    $rel = $this->processor->getImageUploader()->importLocal($refFile, $base);
+                    if ($rel !== false && !in_array($rel, $imported)) {
                         $imported[] = $rel;
                     }
                 }
@@ -525,22 +542,61 @@ class ArticleImporter {
 
     /**
      * Moves a processed file into a subfolder of the import directory.
+     * Also moves associated sibling images and saves a .note file if given.
      *
      * @param string $file Absolute path of the file to move
      * @param string $subdir done|failed
+     * @param string $note Optional note/error description
      * @return bool True on success
      */
-    public function moveTo($file, $subdir) {
-        $targetDir = $this->importDir . $subdir . '/';
+    public function moveTo($file, $subdir, $note = '') {
+        $targetDir = rtrim($this->importDir, '/\\') . '/' . trim($subdir, '/\\') . '/';
         if (!is_dir($targetDir)) {
             if (!mkdir($targetDir, 0755, true)) {
                 return false;
             }
         }
+
         $target = $targetDir . basename($file);
         if (file_exists($target)) {
             $target = $targetDir . time() . '-' . basename($file);
         }
-        return @rename($file, $target);
+
+        $success = false;
+        if (@rename($file, $target)) {
+            $success = true;
+        } elseif (@copy($file, $target)) {
+            @unlink($file);
+            $success = true;
+        }
+
+        if ($success && $note !== '') {
+            @file_put_contents($target . '.note', $note);
+        }
+
+        // Also move any sibling images with matching base name
+        if ($success) {
+            $dir = dirname($file);
+            $base = pathinfo($file, PATHINFO_FILENAME);
+            foreach (glob($dir . '/' . $base . '.*') ?: [] as $f) {
+                if ($f === $file || !is_file($f)) {
+                    continue;
+                }
+                $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+                if (in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'])) {
+                    $imgTarget = $targetDir . basename($f);
+                    if (file_exists($imgTarget)) {
+                        $imgTarget = $targetDir . time() . '-' . basename($f);
+                    }
+                    if (!@rename($f, $imgTarget)) {
+                        if (@copy($f, $imgTarget)) {
+                            @unlink($f);
+                        }
+                    }
+                }
+            }
+        }
+
+        return $success;
     }
 }
