@@ -167,7 +167,7 @@ jobs:
       - name: Install tooling (Node, zip, git, curl)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
-          apk add --no-cache ca-certificates nodejs npm zip git curl 
+          apk add --no-cache ca-certificates nodejs npm zip git curl jq
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
       - name: Trust the Gitea CA
@@ -305,7 +305,8 @@ jobs:
           for i in 1 2 3 4 5; do
             if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
-                 --restart unless-stopped \
+                 --restart unless-stopped \                 
+                 SHUTDOWN_TIMEOUT = "00:10:00"\
                  $DNS_FLAGS \
                  $ADD_HOST_FLAGS \
                  $USER_ENV_FLAGS \
@@ -453,11 +454,57 @@ jobs:
         run: ls -l release-assets/
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.resolve_version.outputs.version }}
-          files: release-assets/*.zip
-          generate_release_notes: true
+        env:
+          PKGTOKEN: ${{ secrets.DUNGEONPAT }}
+        run: |
+          set -euo pipefail
+          OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          TAG="${{ steps.resolve_version.outputs.version }}"
+          API="${GITHUB_SERVER_URL}/api/v1/repos/${OWNER}/${REPO}"
+          AUTH="Authorization: token ${PKGTOKEN}"
+
+          # Release notes from the commits since the previous tag
+          PREV_TAG="$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || true)"
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="${PREV_TAG}..HEAD"
+          else
+            RANGE="-20"
+          fi
+          NOTES="$(git log --pretty='* %s (%h)' $RANGE 2>/dev/null || true)"
+          BODY="$(printf '## %s\n\n%s\n' "$TAG" "$NOTES")"
+
+          # Reuse the release if it already exists (idempotent re-runs)
+          EXISTING="$(curl -sS -H "$AUTH" "${API}/releases/tags/${TAG}" || true)"
+          RELEASE_ID="$(printf '%s' "$EXISTING" | jq -r '.id // empty' 2>/dev/null || true)"
+
+          if [ -n "$RELEASE_ID" ]; then
+            jq -n --arg body "$BODY" '{body:$body}' > /tmp/release.json
+            curl -sS -X PATCH -H "$AUTH" -H 'Content-Type: application/json' \
+              --data @/tmp/release.json "${API}/releases/${RELEASE_ID}" \
+              -o /dev/null -w "Updated release ${TAG}: HTTP %{http_code}\n"
+          else
+            jq -n --arg tag "$TAG" --arg name "$TAG" --arg body "$BODY" \
+              '{tag_name:$tag,name:$name,body:$body,draft:false,prerelease:false}' > /tmp/release.json
+            curl -sS -X POST -H "$AUTH" -H 'Content-Type: application/json' \
+              --data @/tmp/release.json "${API}/releases" \
+              -o /tmp/release.out -w "Created release ${TAG}: HTTP %{http_code}\n"
+            RELEASE_ID="$(jq -r '.id // empty' /tmp/release.out 2>/dev/null || true)"
+          fi
+
+          if [ -z "$RELEASE_ID" ]; then
+            echo "::error::Could not create or find release ${TAG}" >&2
+            cat /tmp/release.out 2>/dev/null >&2 || true
+            exit 1
+          fi
+
+          for f in release-assets/*.zip; do
+            [ -e "$f" ] || continue
+            name="$(basename "$f")"
+            curl -sS -X POST -H "$AUTH" -F "attachment=@${f}" \
+              "${API}/releases/${RELEASE_ID}/assets?name=${name}" \
+              -o /dev/null -w "Uploaded ${name}: HTTP %{http_code}\n"
+          done
 
       - name: Bump version to next SNAPSHOT
         run: |
