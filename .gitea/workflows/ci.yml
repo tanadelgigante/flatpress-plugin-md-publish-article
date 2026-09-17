@@ -157,7 +157,7 @@ jobs:
           done
           echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
-      - name: Install tooling (Node, zip, git)
+      - name: Install tooling (Node, zip, git, curl)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
           apk add --no-cache ca-certificates nodejs npm zip git curl 
@@ -356,10 +356,10 @@ jobs:
           done
           echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
 
-      - name: Install tooling (Node, zip, git)
+      - name: Install tooling (Node, zip, git, curl)
         run: |
           sed -i 's#^https://#http://#' /etc/apk/repositories
-          apk add --no-cache ca-certificates nodejs npm zip git
+          apk add --no-cache ca-certificates nodejs npm zip git curl
           sed -i 's#^http://#https://#' /etc/apk/repositories
 
       - name: Trust the Gitea CA
