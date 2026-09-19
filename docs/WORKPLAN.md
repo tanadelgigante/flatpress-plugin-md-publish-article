@@ -179,8 +179,18 @@
 **Deliverable:** test aggiornati committati (`4ee2ba1`) + report esecuzione.
 **Criterio di accettazione:** ✅ raggiunto (suite verde con failOnRisky/failOnWarning; VERSION `fp-1.5.1` verificato su testbed).
 
-### FASE 4 — CI/CD: implementazione tag `[skip-ci]` (C, T)
-**Obiettivo:** push con `[skip-ci]` non esegue job superflui; nessuna interruzione delle release.
+### FASE 4 — CI/CD: implementazione tag `[skip-ci]` (C, T) — IMPLEMENTATA (verifica matrice APERTA)
+**Obiettivo:** push con `[skip-ci]` non esegue job superflui; nessuna interruzione delle release. Esito: implementazione in `ci.yml` (commit `6b6f995`), **verifica matrice §4.3 sull'istanza Gitea da eseguire** (richiede push → conferma utente).
+
+- **Coder — implementazione completata (Opzione B)**:
+  - Nuovo job gate `ci-skip-check` (n. 0) con output `should_skip`: `workflow_dispatch`→false; `pull_request`→true se `[skip-ci]` in titolo PR / commit head / `head_commit.message`; `push`→scansione `git log ${BEFORE_SHA}..HEAD` (o `HEAD` se before all-zeros, copre anche i push di tag) con `grep -F`. Valori event passati via `env:`, corpo bash senza espressioni `${{ }}`.
+  - `lint`/`test`: `needs: [ci-skip-check]` + `if: should_skip != 'true'`. `package`: if invariato + `needs: [lint, test, ci-skip-check]`. `testbed`: invariato (eredita skip). `release`: `if: should_skip != 'true' && (startsWith(refs/tags/v) || dispatch-job=release)` + `needs: [lint, test, ci-skip-check]`. `notify`: `needs` estesi + `ci-skip-check.result` in JOB_RESULTS + contatore skipped.
+  - Bump post-release: `git commit -m "Bump version to $NEXT after release $GITHUB_REF_NAME [skip-ci]"` (riga 626).
+  - YAML valido (PyYAML + js-yaml), CRLF preservati (697 CRLF, 0 LF), `startsWith` **senza** `*` (i glob non sono supportati dalle funzioni Actions: `*` sarebbe letterale) — pattern allineato all'esistente.
+- **Matrice §4.3 — attesi mappati dal Coder**: scenari 1-7 → comportamenti attesi del workflow (non ancora verificati su istanza reale).
+
+**Deliverable:** `ci.yml` aggiornato (commit `6b6f995`). Matrice da compilare con esiti reali.
+**Criteri di accettazione:** ⏳ *in sospeso* — gli scenari della matrice vanno verificati sull'istanza Gitea (UI+API); il push del bump post-release di una release reale (Fase 6) non deve produrre una run CI superflua. La verifica 1:1 richiede di **pushare commit di prova su `origin`** (eventi push/PR/tag): serve conferma dell'utente (repo remota + possibili notifiche Ntfy/run CI). In alternativa, la matrice può essere verificata **solo in parte** (es. scenario push normale su un branch di lavoro, senza toccare `main`/tag) — da concordare.
 
 **4.1 Progettazione (da approvare con questo piano — dettaglio esecutivo per il Coder)**
 
@@ -220,9 +230,6 @@ Meccanismo **esplicito e robusto** (indipendente da eventuale supporto nativo di
 | 6 | `workflow_dispatch` job=package / job=release | Sempre eseguito (mai skippato) |
 | 7 | PR il cui titolo contiene `[skip-ci]` (se supportato) | `lint`/`test` skipped |
 Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
-
-**Deliverable:** `ci.yml` aggiornato + matrice di test compilata con esiti.
-**Criteri di accettazione:** tutti gli scenari della matrice corrispondono agli attesi; il push del bump post-release di una release reale **(Fase 6)** non produce una run CI superflua.
 
 ### FASE 5 — Manutenibilità: commenti, logging e documentazione (C, T, W)
 **Obiettivo:** rendere il codice mantenibile e tutto documentato, come richiesto dall'utente (R18–R20). Nessuna modifica funzionale: è un'opera di rifinitura al termine dell'implementazione.
