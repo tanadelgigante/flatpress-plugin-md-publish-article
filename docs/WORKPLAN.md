@@ -4,18 +4,18 @@
 **Utente / Orchestratore:** Approvato con decisioni D1/D2/D3 (2026-09-19) + requisiti aggiuntivi (commenti codice, logging, wiki)
 **Data stesura:** 2026-09-19
 **Autore:** Designer (architetto software)
-**Stato:** **APPROVATO CON REQUISITI AGGIUNTIVI** — le decisioni D1/D2/D3 sono state prese dall'utente; nessuna modifica al codice ancora applicata (si parte con la Fase 0).
+**Stato:** **IN ESECUZIONE** — Fase 0 completata (fix ci.yml, WORKPLAN committato, baseline PHPUnit registrata); version.ini aggiornato dall'utente a `1.0.0-SNAPSHOT` → release target **v1.0.0**. Prossime: Fase 1 (test compatibilità).
 
 ---
 
 ## 1. Obiettivo
 
-1. **Verificare e adeguare** il plugin `publisharticle` (v0.9.0, version.ini `0.9.1-SNAPSHOT`) perché funzioni correttamente su **FlatPress 1.5.1** (rilascio ufficiale installato in `/mnt/v/devel/flatpress-1.5.1`), **senza alterare la funzionalità esistente** né fare refactoring opportunistici. Il plugin oggi è validato su FlatPress 1.4.1.
+1. **Verificare e adeguare** il plugin `publisharticle` (v0.9.0, version.ini `1.0.0-SNAPSHOT` aggiornato manualmente dall'utente → release target **v1.0.0**) perché funzioni correttamente su **FlatPress 1.5.1** (rilascio ufficiale installato in `/mnt/v/devel/flatpress-1.5.1`), **senza alterare la funzionalità esistente** né fare refactoring opportunistici. Il plugin oggi è validato su FlatPress 1.4.1.
 2. **Mantenere la piena retrocompatibilità** con le versioni FlatPress già supportate (1.4.x e precedenti): ogni adeguamento per 1.5.1 deve essere **additivo e non distruttivo** (guard `function_exists`, fallback, `system_ver()` con fallback per ambienti senza FlatPress). Nessuna funzionalità esistente deve rompersi su 1.4.x.
 3. **Introdurre il tag `[skip-ci]`** nel workflow CI (Gitea Actions, `.gitea/workflows/ci.yml`): un push il cui commit contiene il token `[skip-ci]` deve **saltare i job non necessari** (lint, test, ecc.). Caso d'uso primario: il commit di **bump di versione post-release** generato automaticamente dal job `release` (riga ~537: `git commit -m "Bump version to ... after release ..."`), che oggi ri-triggera inutilmente l'intera CI (lint+test) sul branch di default.
 4. **Elevare la manutenibilità del codice** alla fine dell'implementazione: **ampi commenti** nel codice sorgente, **logging strutturato a livelli** (INFO/DEBUG configurabili; WARN/ERROR/FATAL sempre attivi) e **documentazione dettagliata** (wiki sul repository Gitea, oppure gerarchia di file Markdown in `docs/` come fallback).
 
-**Esito finale atteso:** plugin compatibile e verificato su FlatPress 1.5.1 (entry marcate con versione corretta), retrocompatibile con 1.4.x, CI che non esegue lavoro inutile sui push "di servizio" (`[skip-ci]`), codice commentato, logging a livelli, documentazione completa (wiki o `docs/`), release v0.9.1 pubblicata in modo pulito.
+**Esito finale atteso:** plugin compatibile e verificato su FlatPress 1.5.1 (entry marcate con versione corretta), retrocompatibile con 1.4.x, CI che non esegue lavoro inutile sui push "di servizio" (`[skip-ci]`), codice commentato, logging a livelli, documentazione completa (wiki o `docs/`), release v1.0.0 pubblicata in modo pulito.
 
 ---
 
@@ -26,18 +26,18 @@
 | --- | --- |
 | Branch | `main` (up to date con `origin/main`) |
 | Ultimo tag | `v0.9.0` |
-| HEAD | `a48dace` "Bump version to 0.9.1-SNAPSHOT after release main" |
-| version.ini | `0.9.1-SNAPSHOT` |
+| HEAD | `a48dace` "Bump version to 0.9.1-SNAPSHOT after release main" (+ 2 commit locali Fase 0: `fix(ci): pass SHUTDOWN_TIMEOUT as -e env to testbed container` `5887229`, `docs: add WORKPLAN…` `440e5a3`) |
+| version.ini | `1.0.0-SNAPSHOT` (aggiornato manualmente dall'utente PRIMA della Fase 0 → **release target: v1.0.0**) |
+| .gitignore | `+ test-manual/` (aggiunta manuale utente, non committata al momento della stesura) |
 | Storia recente | commit `release fix`, `no pending`, `PID/GID`, `release fix` (nessun tag intermedio) |
-| Worktree | **modifica NON committata** su `.gitea/workflows/ci.yml` (vedi 2.2) |
+| Worktree | **modifica NON committata** su `version.ini` e `.gitignore` (modifiche manuali utente, intenzionali) |
 | Sorgenti FlatPress disponibili (locali) | **1.5.1**: `/mnt/v/devel/flatpress-1.5.1` · **1.4.1**: `/mnt/v/devel/flatpress-1.4.1` → confronti API diretti possibili (vedi Fase 1) |
 
-### 2.2 Modifica non committata in `.gitea/workflows/ci.yml` (da segnalare e gestire in Fase 0)
-- Il file usa **fine riga CRLF** (`^M$` verificato con `cat -A`): qualsiasi editing deve preservare i CRLF.
-- Il **working tree** (riga ~314) passa correttamente `-e SHUTDOWN_TIMEOUT="00:10:00" \` come opzione `docker run` (con il prefisso `-e`), **dopo** il mount di `import-in`.
-- Il commit **HEAD** contiene invece la riga spezzata (senza `-e`, con spazi attorno a `=`) `SHUTDOWN_TIMEOUT = "00:10:00"\` → non è una variabile d'ambiente passata a docker; la correzione nel working tree è da **committare come fix autonomo** (Fase 0).
-- Nota: sia in HEAD sia nel working tree la riga `--restart unless-stopped \` ha **spazi finali**; innocui per bash ma da ripulire in Fase 0/4.
-- La modifica non committata **non è parte** della verifica di compatibilità FlatPress, ma va normalizzata per poter lavorare su `git`/CI in modo pulito.
+### 2.2 Modifica non committata in `.gitea/workflows/ci.yml` — RISOLTA in Fase 0 ✅
+- Il file usa **fine riga CRLF** (preservato in tutto l'editing di Fase 0).
+- La modifica nel working tree passava correttamente `-e SHUTDOWN_TIMEOUT="00:10:00" \` come opzione `docker run` (con il prefisso `-e`).
+- Il commit `HEAD` originale conteneva invece la riga spezzata (senza `-e`): corretta in **Fase 0** nel commit `fix(ci): pass SHUTDOWN_TIMEOUT as -e env to testbed container` (`5887229`), che rimuove anche gli spazi finali su `--restart unless-stopped \` preservando i CRLF.
+- **Modifiche residue in worktree dopo la Fase 0** (NON legate al CI, intenzionali dell'utente): `version.ini` → `1.0.0-SNAPSHOT` e `.gitignore` (+`test-manual/`). Decisione utente 👉 mantenute; la release target diventa **v1.0.0**.
 
 ### 2.3 Risultati dell'analisi esplorativa (base già verificata — 1.4.1 ↔ 1.5.1)
 **API FlatPress usate dal plugin e risultate INVARIATE sui sorgenti 1.5.1:**
@@ -109,15 +109,15 @@
 
 > Responsabili: **Coder** (C), **Tester** (T), **Writer** (W). Ogni fase ha deliverable e criteri di accettazione. L'ordine è sequenziale salvo indicazioni contrarie.
 
-### FASE 0 — Preparazione e normalizzazione baseline (C, T)
+### FASE 0 — Preparazione e normalizzazione baseline (C, T) — ✅ COMPLETATA (2026-09-19)
 **Obiettivo:** partire da un worktree pulito e da una baseline test verde.
 
-- **Task 0.1 — Commit del fix CI non committato** (C): committare separatamente la modifica già presente in working tree su `.gitea/workflows/ci.yml` (`-e SHUTDOWN_TIMEOUT="00:10:00"` corretto), **preservando i CRLF** e rimuovendo gli spazi finali sulla riga `--restart unless-stopped \`. Messaggio proposto: `fix(ci): pass SHUTDOWN_TIMEOUT as -e env to testbed container`. *Separato* da ogni successiva modifica `[skip-ci]` per chiarezza di storia.
-- **Task 0.2 — Baseline PHPUnit** (T): `composer install` in `publisharticle/` + `vendor/bin/phpunit --testdox`; registrare esito su PHP 8.4 (locale o CI).
-- **Task 0.3 — Snapshot baseline** (C): registrare SHA/versioni di partenza (tag `v0.9.0`, HEAD, version.ini).
+- **Task 0.1 — Commit del fix CI non committato** (C): ✅ committato come `fix(ci): pass SHUTDOWN_TIMEOUT as -e env to testbed container` (`5887229`), CRLF preservati, spazi finali rimossi da `--restart unless-stopped \`.
+- **Task 0.1b — Commit del WORKPLAN** (C): ✅ `docs: add WORKPLAN for FlatPress 1.5.1 compat and [skip-ci]` (`440e5a3`).
+- **Task 0.2 — Baseline PHPUnit** (T): ✅ 97 test, 253 assertions, 0 failures/errors/risky/deprecation (PHP locale 8.3.6 vs 8.4 CI; PHPUnit 11.5.56). ⚠️ **1 warning pre-esistente** (`mkdir(): Permission denied` in `ArticleImporterTest::testImportFileWarnsWhenNothingCanBeMoved`, chmod 0555 sul fixtures) → con `failOnWarning=true` la run locale esce con codice 1; in CI (root/Alpine) il test risulta skip → verde. **Da gestire in Fase 3**.
+- **Task 0.3 — Snapshot baseline** (C): ✅ HEAD dopo Fase 0 `440e5a3`; ultimo tag `v0.9.0`; `version.ini` nell'ambiente di lavoro è poi passato a `1.0.0-SNAPSHOT` (modifica manuale utente, intenzionale; non committata perché fuori scope Fase 0).
 
-**Deliverable:** worktree pulito (unica modifica: `docs/WORKPLAN.md` se non ancora committato), commit 0.1 su `main`, report PHPUnit verde.
-**Criteri di accettazione:** `git status` senza diff residui su `ci.yml`; PHPUnit verde; CRLF preservati.
+**Esito atteso/raggiunto:** worktree SENZA diff residui su `ci.yml`; PHPUnit funzionalmente verde (warning ambientale noto); CRLF preservati. Modifiche residue in worktree: `version.ini` e `.gitignore` (modifiche utente intenzionali, da normalizzare prima della release).
 
 ### FASE 1 — Test di compatibilità su FlatPress 1.5.1 (T, con C in supporto)
 **Obiettivo:** dimostrare (o smentire) la piena compatibilità funzionale su 1.5.1 senza modifiche.
@@ -206,8 +206,8 @@ Meccanismo **esplicito e robusto** (indipendente da eventuale supporto nativo di
 | 1 | Push su `main` di commit normale ("fix: ...") | `lint`+`test` eseguiti; `package`/`testbed` saltati (come oggi); `release` non parte |
 | 2 | Push su `main` di commit con subject `chore: bump ... [skip-ci]` | Run creata con `ci-skip-check` ok e `lint`/`test` **skipped**; `notify` ne dà conto; nessuna esecuzione docker |
 | 3 | Push multi-commit (uno contiene `[skip-ci]`) | Allo stesso modo dello scenario 2 (se si implementa la scansione multi-commit) |
-| 4 | Push di tag `v0.9.1` con commit di rilascio normale (senza token) | `lint`+`test`+`release` eseguiti; release creata; bump post-release con `[skip-ci]` |
-| 5 | Push di tag `v0.9.1` il cui commit contiene `[skip-ci]` (opzione B) | **Tutto saltato** (`ci-skip-check` = true), release compresa; eventuale release di recupero via `workflow_dispatch` `job=release` con `package_run_id` |
+| 4 | Push di tag `v1.0.0` con commit di rilascio normale (senza token) | `lint`+`test`+`release` eseguiti; release creata; bump post-release con `[skip-ci]` |
+| 5 | Push di tag `v1.0.0` il cui commit contiene `[skip-ci]` (opzione B) | **Tutto saltato** (`ci-skip-check` = true), release compresa; eventuale release di recupero via `workflow_dispatch` `job=release` con `package_run_id` |
 | 6 | `workflow_dispatch` job=package / job=release | Sempre eseguito (mai skippato) |
 | 7 | PR il cui titolo contiene `[skip-ci]` (se supportato) | `lint`/`test` skipped |
 Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
@@ -234,14 +234,14 @@ Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
 **Deliverable:** codice commentato; utility log + test; wiki su Gitea **oppure** gerarchia `docs/` con indice e link incrociati; README aggiornato.
 **Criteri di accettazione:** R18–R20 soddisfatti: ogni classe documentata, log a livelli con soglia configurabile e WARN/ERROR/FATAL sempre attivi, documentazione linkata e completa; PHPUnit ancora verde dopo l'aggiunta dei test di logging; `php -l` pulito.
 
-### FASE 6 — Release v0.9.1 (C, con approvazione utente)
+### FASE 6 — Release v1.0.0 (C, con approvazione utente)
 **Flusso (Opzione B + VERSION dinamico, coerentemente con le decisioni approvate):**
-1. Preparare il commit di release: version.ini `0.9.1` (senza `-SNAPSHOT`); subject es. `Release v0.9.1` (**senza** `[skip-ci]`, così lint/test/release girano e il tag viene validato).
-2. Tag `v0.9.1` e push del tag → CI esegue `lint`+`test`+`release`; release pubblicata su Gitea con asset zip.
-3. Il job `release` fa il bump a `0.9.2-SNAPSHOT` col commit che **contiene `[skip-ci]` aggiunto automaticamente** dal passo "Bump version to next SNAPSHOT" → il push sul default branch non ri-triggera il workflow (R13).
+1. Preparare il commit di release: version.ini `1.0.0` (senza `-SNAPSHOT`); subject es. `Release v1.0.0` (**senza** `[skip-ci]`, così lint/test/release girano e il tag viene validato).
+2. Tag `v1.0.0` e push del tag → CI esegue `lint`+`test`+`release`; release pubblicata su Gitea con asset zip.
+3. Il job `release` fa il bump a `1.0.1-SNAPSHOT` col commit che **contiene `[skip-ci]` aggiunto automaticamente** dal passo "Bump version to next SNAPSHOT" → il push sul default branch non ri-triggera il workflow (R13).
 4. Verifica finale: nessuna run CI superflua; entry di esempio marcata `fp-1.5.1` su FlatPress 1.5.1 e lettura corretta anche su 1.4.1 (retrocompatibilità).
 
-**Deliverable:** tag `v0.9.1`, release su Gitea, `version.ini` = `0.9.2-SNAPSHOT`.
+**Deliverable:** tag `v1.0.0`, release su Gitea, `version.ini` = `1.0.1-SNAPSHOT`.
 **Criteri di accettazione:** release pubblicata; ultimo push (bump con `[skip-ci]`) non produce lavoro CI; Fase 4 matrice scenario 4-6 confermato in produzione.
 
 ---
@@ -273,7 +273,7 @@ Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
 4. **Qualità**: `php -l` pulito; suite PHPUnit verde (phpunit ^10||^11, PHP 8.4, niente risky/warning); test aggiornati per la nuova versione di default e la compatibilità legacy.
 5. **CI `[skip-ci]`**: gate job attivo (opzione B); matrice di test (7 scenari) compilata e conforme; commit di bump post-release contiene il token aggiunto automaticamente dal passo "Bump version to next SNAPSHOT"; nessuna run CI superflua dopo il bump reale della Fase 6.
 6. **Manutenibilità (R18–R20)**: codice ampiamente commentato (R18); logging a livelli INFO/DEBUG configurabili e WARN/ERROR/FATAL sempre attivi (R19) con test dedicati; documentazione completa sotto forma di **wiki su Gitea** o, in alternativa, **gerarchia di Markdown in `docs/` con indice e link incrociati** ai file già presenti (R20).
-7. **Release**: `v0.9.1` pubblicata su Gitea con asset; `version.ini` a `0.9.2-SNAPSHOT`; worktree pulito.
+7. **Release**: `v1.0.0` pubblicata su Gitea con asset; `version.ini` a `1.0.1-SNAPSHOT`; worktree pulito.
 8. **Perimetro**: nessun refactor opportunistico; nessuna modifica oltre quelle previste dal piano.
 
 ---
