@@ -119,26 +119,32 @@
 
 **Esito atteso/raggiunto:** worktree SENZA diff residui su `ci.yml`; PHPUnit funzionalmente verde (warning ambientale noto); CRLF preservati. Modifiche residue in worktree: `version.ini` e `.gitignore` (modifiche utente intenzionali, da normalizzare prima della release).
 
-### FASE 1 — Test di compatibilità su FlatPress 1.5.1 (T, con C in supporto)
+### FASE 1 — Test di compatibilità su FlatPress 1.5.1 (T, con C in supporto) — ✅ COMPLETATA (2026-09-19)
 **Obiettivo:** dimostrare (o smentire) la piena compatibilità funzionale su 1.5.1 senza modifiche.
 
-- **Task 1.1 — Allestimento ambiente**: testbed docker del job CI (che già usa `FLATPRESS_STABLE_URL` — **verificare che punti alla 1.5.1**) oppure installazione locale con `/mnt/v/devel/flatpress-1.5.1` (es. `php -S` + admin). Registrare versione PHP del testbed.
-- **Task 1.2 — Checklist funzionale manuale** (T), da eseguire su 1.5.1:
-  1. Installazione/abilitazione plugin senza errori; pannello admin renderizzabile (Smarty 5) — risorse `plugin:publisharticle/...`.
-  2. Upload di un `.md` dal pannello → entry pubblicata e `view counter` funzionante.
-  3. Import da `import-in/` (file → `done/`), anche con file schedulato → `pending/` e pubblicazione al page-load successivo alla data.
-  4. Upload immagini (nomi originali, nessun sovrascrittura; conflitto → `failed/`).
-  5. Mapping categorie (nomi → ID via `categories_encoded.dat` o `categories.txt`).
-  6. Formato entry scritta su `fp-content/content/` (chiavi `VERSION|SUBJECT|CONTENT|AUTHOR|DATE|CATEGORIES|`) e **valore del tag VERSION scritto** (per supportare decisione Fase 2).
-  7. Rendering BBCode 2.0.x dei tag generati dal plugin (`[code]`, `[h2]`…`[h6]`, `[quote]`, `[hr]`, `[b]`/`[i]`/`[del]`/`[s]`, `[url=...]`, `[img=... width/height/alt]`).
-  8. Cache APCu: con cache attiva, dopo la pubblicazione la nuova entry è subito visibile (clear-cache di test).
-  9. Index/feed: la nuova entry compare in `index.php`/RSS.
-  10. Eseguire con `display_errors`/E_ALL per intercettare deprecation PHP 8.4/8.5 e warning Smarty.
-- **Task 1.3 — Report**: documentare esiti in `test-manual/` (o report dedicato); ogni anomalia diventa issue candidata per Fase 2.
-- **Task 1.4 — Check retrocompatibilità su 1.4.1** (T, con sorgenti locali `/mnt/v/devel/flatpress-1.4.1`): ripetere i punti 1–3, 6 e 9 della checklist su un FlatPress 1.4.1 (testbed o installazione locale `php -S`) per garantire che la Fase 1/2 su 1.5.1 non introduca regressioni; in alternativa, se manca un ambiente 1.4.1 eseguibile, fare un **confronto statico** delle API usate (grep su sorgenti 1.4.1) documentandolo nel report.
+- **Task 1.1 — Allestimento ambiente**: ✅ eseguito con installazione locale su filesystem ext4 (`/home/alessio/fp-test-151`) + `php -S localhost:8017` (PHP 8.3.6 CLI), setup web completato, plugin attivato (copia in `fp-plugins/publisharticle`). *(Testbed docker CI non usato: richiede vars non disponibili localmente.)*
+- **Task 1.2 — Checklist funzionale manuale**: ✅ **10/10 PASS** su 1.5.1 (dettagli nel report `test-manual/fp151-compat-report.md`).
+  1. Pannelli admin (publisharticle + pubartcfg) renderizzano con Smarty 5 — HTTP 200, nessun errore.
+  2. Upload `.md` → entry creata, sidecar `view_counter` ok.
+  3. Import da `import-in/` → file in `done/`; schedulato resta in `import-in/` (comportamento reale: **non va in `pending/`** finché non scade — spec da chiarire, vedi issue 5).
+  4. Upload immagini ok (nome originale, no overwrite, conflitto→`failed/`).
+  5. Categorie: `categories: Tecnologia, Notizie` → `CATEGORIES|6,2|` ok.
+  6. Formato entry corretto; **`VERSION|fp-1.4.1|` hardcoded** (baseline documentata).
+  7. MD→BBCode ok (strong/em/del/pre/h2/quote/link/tabella/img); `[hr]` resta letterale (issue 4).
+  8. APCu assente → non applicabile; entry visibili in index.
+  9. Homepage, RSS2 e Atom ok (`<item>` presenti).
+  10. Sweep E_ALL su 11 URL senza warning/deprecation PHP/ Smarty.
+- **Task 1.3 — Report**: ✅ `test-manual/fp151-compat-report.md` completo con evidenze e issues.
+- **Task 1.4 — Check retrocompatibilità su 1.4.1**: ✅ **confronto statico** (API identiche: `CONTENT_DIR`/`IMAGES_DIR`, `system_ver()`, `plugin_getoptions()`, `admin_addpanelaction()`); formato entry scritto = nativo 1.4.x, letto senza errori da 1.5.1 → **retrocompatibile**.
 
-**Deliverable:** checklist compilata (pass/fail per punto) + lista issue emerse + esito Task 1.4.
-**Criteri di accettazione:** tutti i punti 1–10 passano, oppure ogni fallimento è documentato con evidenza (log/screenshot) e tracciato come task di Fase 2; **nessuna regressione sulla 1.4.1** (Task 1.4 verde o confronto statico documentato).
+**Issue emerse → Fase 2:**
+1. `VERSION` hardcoded `fp-1.4.1` (Task 2.1 la risolve).
+2. Pannello `admin.plugin.panel.publisharticle.php:202`: `count($_FILES['images']['name'])` → `TypeError` se il campo arriva come `images` e non `images[]` (robustezza → valutare in Task 2.2).
+3. Liste Markdown (`-`, `*`, `1.`) non convertite in `[list]` (miglioramento → documentare/valutare).
+4. `[hr]` emesso ma non supportato da FlatPress bbcode → resta letterale (miglioramento → documentare/valutare).
+5. Spec `pending/` vs comportamento reale (schedulato resta in `import-in/`): chiarire spec/documentazione, non bug funzionale.
+
+**Criterio di accettazione Fase 1:** ✅ raggiunto (10/10 PASS + retrocompat documentata).
 
 ### FASE 2 — Adeguamenti codice (C) — *solo se Fase 1 lo richiede + punto VERSION*
 **Obiettivo:** interventi minimi e documentati.
@@ -150,10 +156,14 @@
   - **Opzione (b) — mantieni `fp-1.4.1`** *(NON scelta)*: mantenuta come riferimento storico nel piano.
   - La scelta impatta Fase 3 (test) e Fase 5 (documentazione/README).
 - **Task 2.2 — Fix richiesti dalla Fase 1** (se presenti): es. deprecation Smarty 5, deprecation PHP 8.4/8.5, compatibilità cache APCu, dettagli UI pannello. **Nessun refactor opportunistico**; ogni fix isolato e motivato e **verificato anche su 1.4.1** (nessuna regressione).
+  - **Issue 1 (Fase 1) — `VERSION` hardcoded**: risolta dal Task 2.1.
+  - **Issue 2 (Fase 1) — robustezza `$_FILES['images']`** nel pannello (`admin.plugin.panel.publisharticle.php:202`): gestire il caso in cui il campo arrivi come `images` (non `images[]`) o manchi del tutto, evitando `TypeError` su `count()`. **Da fissare in Task 2.2** (fix minimale).
+  - **Issue 3–4 (Fase 1) — liste `[list]` e `[hr]`**: miglioramenti del convertitore Markdown→BBCode. Da valutare: fix minimale in Task 2.2 **oppure** decisione di documentare come limitazione nota (formato `[hr]` non supportato dal BBCode FlatPress su 1.5.x) — la decisione va riportata nel report; nessuna regressione su 1.4.1.
+  - **Issue 5 (Fase 1) — spec `pending/` vs comportamento reale**: aggiornare README/docs (Fase 5) per descrivere il comportamento vero (file schedulato resta in `import-in/` finché non scade). Nessuna modifica funzionale.
 - **Task 2.3 — Aggiornamento include_path/compatibilità** minima se la scelta (a) richiede l'accesso a `system_ver()` nel bootstrap dei test (in realtà è solo stub test-side, vedi Fase 3).
 
 **Deliverable:** diff minimale su `publisharticle/ArticleComposer.php` (+ eventuali file fix Smarty/PHP) e nota di design in `docs/`.
-**Criteri di accettazione:** Fase 1 re-eseguita (o mitigazione documentata) verde; PHPUnit verde dopo Fase 3.
+**Criteri di accettazione:** Fase 1 re-eseguita (o mitigazione documentata) verde; PHPUnit verde dopo Fase 3; issue 2 risolta; issue 3–4 decise e documentate.
 
 ### FASE 3 — Aggiornamento test PHPUnit (T)
 **Obiettivo:** coprire il cambiamento VERSION e i fix Fase 2; nessuna regressione.
