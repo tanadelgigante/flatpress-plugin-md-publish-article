@@ -412,14 +412,38 @@ class ArticleImporterTest extends TestCase {
             $this->markTestSkipped('cannot simulate a read-only dir (running with elevated privileges)');
         }
 
-        $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
-        $result = $importer->importFile($tmp . 'post.md');
-
+        // SCELTA Fase 3 / Task 3.3: the importer's moveTo() calls mkdir() on
+        // the now read-only tmp dir; mkdir() raises "mkdir(): Permission
+        // denied", which PHPUnit would record as a test warning and fail the
+        // whole run (phpunit.xml sets failOnWarning="true"). That PHP warning
+        // is the EXPECTED side effect of the scenario under test, so we swap
+        // in a temporary error handler that captures it (and asserts it fired)
+        // instead of letting PHPUnit report it. The plugin code itself is not
+        // modified (Phase 5 handles code comments/logging).
+        $emitted = [];
+        set_error_handler(function ($severity, $message) use (&$emitted) {
+            $emitted[] = $message;
+            return true;
+        });
+        try {
+            $importer = new ArticleImporter(new FakeSuccessProcessor(), $tmp, []);
+            $result = $importer->importFile($tmp . 'post.md');
+        } finally {
+            restore_error_handler();
+        }
         chmod($tmp, 0777);
+
         $this->assertTrue($result['success']);
         $this->assertNotEmpty($result['warning']);
         // The file is still there, so it would be published again — warning is the only signal
         $this->assertFileExists($tmp . 'post.md');
+        // Guard: the scenario must really have hit the expected mkdir() failure
+        $this->assertNotEmpty(
+            array_filter($emitted, function ($message) {
+                return strpos($message, 'mkdir()') !== false;
+            }),
+            'expected the importer to attempt mkdir() inside the read-only dir'
+        );
     }
 
     // ── constructor / directories ──────────────────────────────────

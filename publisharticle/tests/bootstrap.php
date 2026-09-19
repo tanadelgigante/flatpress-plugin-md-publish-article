@@ -56,6 +56,25 @@ if (!function_exists('entry_dir')) {
     }
 }
 
+// ── Stub FlatPress system_ver() ───────────────────────────────────
+// FlatPress defines system_ver() = 'fp-' . SYSTEM_VER in core.system.php
+// (1.4.x → 'fp-1.4.1', 1.5.x → 'fp-1.5.1'). ArticleComposer uses it as the
+// default entry VERSION tag and falls back to FALLBACK_VERSION when it is
+// missing (unit-test bootstrap, no FlatPress runtime).
+//
+// SCELTA (Fase 3, Task 3.1): the default test runtime simulates FlatPress
+// 1.5.1, so this stub returns 'fp-1.5.1' (matching the value written by
+// admin.entry.write.php on a real 1.5.x install). No test in the main suite
+// can observe the fallback path because PHP cannot "unset" a function in the
+// same process; the absent-system_ver fallback is covered in isolation by
+// ArticleComposerTest::testDefaultVersionFallsBackWithoutSystemVer(), which
+// spawns a fresh PHP process that loads the sources WITHOUT this stub.
+if (!function_exists('system_ver')) {
+    function system_ver() {
+        return 'fp-1.5.1';
+    }
+}
+
 // ── Load all source classes ───────────────────────────────────────
 // These files use require_once with bare names (e.g. require_once 'ArticleParser.php')
 // which will resolve via the include_path set above.

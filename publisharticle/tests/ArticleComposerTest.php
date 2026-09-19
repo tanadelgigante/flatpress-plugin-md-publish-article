@@ -57,13 +57,78 @@ class ArticleComposerTest extends TestCase {
     }
 
     public function testBuildEntryStringDefaultVersion(): void {
+        // No explicit version: the default comes from the global system_ver()
+        // stub (tests/bootstrap.php) which simulates FlatPress 1.5.1.
         $entry = [
             'subject' => 'Test',
             'content' => 'Body',
             'date'    => '1234567890',
         ];
         $str = $this->composer->buildEntryString($entry);
-        $this->assertStringContainsString('VERSION|fp-1.4.1', $str);
+        $this->assertStringContainsString('VERSION|fp-1.5.1', $str);
+        $this->assertStringStartsWith('VERSION|fp-1.5.1|', $str);
+    }
+
+    public function testBuildEntryStringPreservesExplicitVersionOverride(): void {
+        // An explicit 'version' key must always win over system_ver()/fallback,
+        // whatever the value (not only the legacy fp-1.4.1).
+        $str = $this->composer->buildEntryString([
+            'version' => 'fp-1.6.0',
+            'subject' => 'T',
+            'content' => 'C',
+            'date'    => '1234567890',
+        ]);
+        $this->assertStringStartsWith('VERSION|fp-1.6.0|', $str);
+    }
+
+    public function testDefaultVersionFallsBackWithoutSystemVer(): void {
+        // The fallback path (system_ver() missing → FALLBACK_VERSION) cannot be
+        // exercised in-process because PHP cannot remove the bootstrap stub at
+        // runtime. It is probed in a fresh PHP process that loads the plugin
+        // sources WITHOUT tests/bootstrap.php (see the fixture script).
+        $src = dirname(__DIR__);
+        $script = $src . '/tests/fixtures/fallback_entry.php';
+        $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' ' . escapeshellarg($src);
+        exec($cmd, $output, $status);
+
+        $this->assertSame(0, $status, 'fallback probe failed: ' . implode("\n", $output));
+        $lines = array_values(array_filter($output, function ($l) {
+            return trim($l) !== '';
+        }));
+
+        $this->assertCount(3, $lines);
+        $this->assertSame('fp-1.5.1', ArticleComposer::FALLBACK_VERSION);
+        // 1) buildEntryString() default → FALLBACK_VERSION
+        $this->assertStringStartsWith('VERSION|' . ArticleComposer::FALLBACK_VERSION . '|', $lines[0]);
+        // 2) buildEntry() default → FALLBACK_VERSION
+        $this->assertSame(ArticleComposer::FALLBACK_VERSION, $lines[1]);
+        // 3) explicit override is still preserved in the fallback runtime
+        $this->assertStringStartsWith('VERSION|fp-1.6.0|', $lines[2]);
+    }
+
+    public function testLegacyFp141SerializedEntryStillReadable(): void {
+        // A legacy entry crafted with VERSION|fp-1.4.1| (the old hardcoded
+        // default, still written by FlatPress 1.4.x) keeps its version when
+        // re-serialized with an explicit override and parses back unchanged:
+        // the entry format is invariant across 1.4.1→1.5.1.
+        $legacy = [
+            'version'    => 'fp-1.4.1',
+            'subject'    => 'Old post',
+            'content'    => 'Old body',
+            'author'     => 'admin',
+            'date'       => '1769020790',
+            'categories' => '1,2',
+        ];
+        $serialized = $this->composer->buildEntryString($legacy);
+        $this->assertStringStartsWith('VERSION|fp-1.4.1|', $serialized);
+
+        $parsed = (new ArticleParser())->parseEntryString($serialized);
+        $this->assertSame('fp-1.4.1', $parsed['version']);
+        $this->assertSame('Old post', $parsed['subject']);
+        $this->assertSame('Old body', $parsed['content']);
+        $this->assertSame('admin', $parsed['author']);
+        $this->assertSame('1769020790', $parsed['date']);
+        $this->assertSame('1,2', $parsed['categories']);
     }
 
     // ── markdownToBBCode ───────────────────────────────────────────
@@ -142,12 +207,23 @@ class ArticleComposerTest extends TestCase {
     // ── buildEntry ─────────────────────────────────────────────────
 
     public function testBuildEntryDefaults(): void {
+        // No explicit version: the default comes from the global system_ver()
+        // stub (tests/bootstrap.php) which simulates FlatPress 1.5.1.
         $result = $this->composer->buildEntry([], 'Hello', 1700000000);
-        $this->assertSame('fp-1.4.1', $result['version']);
+        $this->assertSame('fp-1.5.1', $result['version']);
         $this->assertSame('', $result['subject']);
         $this->assertSame('admin', $result['author']);
         $this->assertSame(1700000000, $result['date']);
         $this->assertSame('', $result['categories']);
+    }
+
+    public function testBuildEntryPreservesExplicitVersionOverride(): void {
+        // An explicit 'version' property must always win over system_ver()/fallback.
+        $result = $this->composer->buildEntry(['version' => 'fp-1.4.1'], 'Hello', 0);
+        $this->assertSame('fp-1.4.1', $result['version']);
+
+        $result = $this->composer->buildEntry(['version' => 'fp-1.6.0'], 'Hello', 0);
+        $this->assertSame('fp-1.6.0', $result['version']);
     }
 
     public function testBuildEntryWithSubject(): void {
