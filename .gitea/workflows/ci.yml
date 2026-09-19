@@ -32,8 +32,95 @@ permissions:
   contents: read
 
 jobs:
+  # ── Job 0: [skip-ci] gate ─────────────────────────────────────────────────────────────────────────
+  ci-skip-check:
+    runs-on: local
+    outputs:
+      should_skip: ${{ steps.check.outputs.should_skip }}
+    steps:
+      - name: Configure internal DNS
+        run: |
+          set -euo pipefail
+          resolvconf=/etc/resolv.conf
+          if [ ! -w "$resolvconf" ] && [ ! -w /etc ]; then
+            echo "::warning::/etc/resolv.conf is not writable; skipping DNS config"
+            exit 0
+          fi
+          : > "$resolvconf"
+          for ns in $INTERNAL_DNS; do
+            printf 'nameserver %s\n' "$ns" >> "$resolvconf"
+          done
+          echo "Configured /etc/resolv.conf with resolvers: $INTERNAL_DNS"
+
+      - name: Install tooling (git, ca-certificates)
+        run: |
+          sed -i 's#^https://#http://#' /etc/apk/repositories
+          apk add --no-cache ca-certificates git
+          sed -i 's#^http://#https://#' /etc/apk/repositories
+
+      - name: Trust the Gitea CA
+        env:
+          DUNGEONCACERT: ${{ secrets.DUNGEONCACERT }}
+        run: |
+          set -euo pipefail
+          if [ -n "$DUNGEONCACERT" ]; then
+            printf '%s\n' "$DUNGEONCACERT" > /usr/local/share/ca-certificates/gitea-ca.crt
+            update-ca-certificates
+            echo "NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt" >> "$GITHUB_ENV"
+            git config --global http.sslCAInfo /etc/ssl/certs/ca-certificates.crt
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether CI should be skipped
+        id: check
+        env:
+          GITEA_EVENT: ${{ github.event_name }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message || '' }}
+          PR_TITLE: ${{ github.event.pull_request.title || '' }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || '' }}
+          BEFORE_SHA: ${{ github.event.before || '' }}
+        run: |
+          set -euo pipefail
+
+          SHOULD_SKIP=false
+
+          if [ "$GITEA_EVENT" = "workflow_dispatch" ]; then
+            # R11: manual dispatch is explicitly requested, never skippable
+            SHOULD_SKIP=false
+          elif [ "$GITEA_EVENT" = "pull_request" ]; then
+            # Skip if the PR title or the PR head commit message contains [skip-ci]
+            if printf '%s\n' "$PR_TITLE" | grep -Fq '[skip-ci]'; then
+              SHOULD_SKIP=true
+            fi
+            PR_MESSAGE="$(git log -1 --format=%B "$PR_HEAD_SHA" 2>/dev/null || true)"
+            if printf '%s\n' "$PR_MESSAGE" | grep -Fq '[skip-ci]'; then
+              SHOULD_SKIP=true
+            fi
+            if printf '%s\n' "$HEAD_MESSAGE" | grep -Fq '[skip-ci]'; then
+              SHOULD_SKIP=true
+            fi
+          elif [ "$GITEA_EVENT" = "push" ]; then
+            # Push: scan all pushed commits. For tag pushes (and branch creation)
+            # `before` is empty or all-zeros -> scan HEAD only (covers the tag commit).
+            if [ -n "$BEFORE_SHA" ] && ! printf '%s' "$BEFORE_SHA" | grep -Eq '^0+$'; then
+              COMMITS="$(git log --format=%B "${BEFORE_SHA}..HEAD" 2>/dev/null || git log --format=%B HEAD 2>/dev/null || true)"
+            else
+              COMMITS="$(git log --format=%B HEAD 2>/dev/null || true)"
+            fi
+            if printf '%s\n' "$COMMITS" | grep -Fq '[skip-ci]'; then
+              SHOULD_SKIP=true
+            fi
+          fi
+
+          echo "Event=$GITEA_EVENT should_skip=$SHOULD_SKIP"
+          echo "should_skip=$SHOULD_SKIP" >> "$GITHUB_OUTPUT"
   # ── Job 1: Syntax lint (php -l) on every PHP file ────────────────
   lint:
+    if: needs.ci-skip-check.outputs.should_skip != 'true'
+    needs: [ci-skip-check]
     runs-on: local
     steps:
       - name: Configure internal DNS
@@ -88,6 +175,8 @@ jobs:
 
   # ── Job 2: PHPUnit unit tests ────────────────────────────────────
   test:
+    if: needs.ci-skip-check.outputs.should_skip != 'true'
+    needs: [ci-skip-check]
     runs-on: local
     steps:
       - name: Configure internal DNS
@@ -142,7 +231,7 @@ jobs:
   # ── Job 3: Build installation package ────────────────────────────
   package:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'package'
-    needs: [lint, test]
+    needs: [lint, test, ci-skip-check]
     runs-on: local
     permissions:
       contents: read
@@ -350,8 +439,8 @@ jobs:
 
   # ── Job 4: Create Gitea Release ──────────────────────────────────
   release:
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release')
-    needs: [lint, test]
+    if: needs.ci-skip-check.outputs.should_skip != 'true' && (startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.job == 'release'))
+    needs: [lint, test, ci-skip-check]
     runs-on: local
     permissions:
       contents: write
@@ -534,13 +623,13 @@ jobs:
             echo "version.ini is already up to date ($NEXT); nothing to commit"
             exit 0
           fi
-          git commit -m "Bump version to $NEXT after release $GITHUB_REF_NAME"
+          git commit -m "Bump version to $NEXT after release $GITHUB_REF_NAME [skip-ci]"
           git push origin "$BRANCH"
 
   # ── Job 5: Notify the outcome on Ntfy ─────────────────────────────
   notify:
     if: always()
-    needs: [lint, test, package, testbed, release]
+    needs: [ci-skip-check, lint, test, package, testbed, release]
     runs-on: local
     permissions:
       contents: read
@@ -567,7 +656,7 @@ jobs:
 
       - name: Send Ntfy notification
         env:
-          JOB_RESULTS: "${{ needs.lint.result }},${{ needs.test.result }},${{ needs.package.result }},${{ needs.testbed.result }},${{ needs.release.result }}"
+          JOB_RESULTS: "${{ needs.ci-skip-check.result }},${{ needs.lint.result }},${{ needs.test.result }},${{ needs.package.result }},${{ needs.testbed.result }},${{ needs.release.result }}"
         run: |
           set -euo pipefail
 
@@ -582,6 +671,14 @@ jobs:
           elif [[ "$JOB_RESULTS" == *cancelled* ]]; then
             STATUS="cancelled"
           fi
+
+          SKIPPED_COUNT=0
+          for r in $(printf '%s' "$JOB_RESULTS" | tr ',' ' '); do
+            if [ "$r" = "skipped" ]; then
+              SKIPPED_COUNT=$((SKIPPED_COUNT+1))
+            fi
+          done
+          echo "Skipped jobs in this run: $SKIPPED_COUNT"
 
           case "$STATUS" in
             success)   TITLE="CI OK — publisharticle";        TAGS="white_check_mark"; PRIORITY=2 ;;
