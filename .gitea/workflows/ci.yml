@@ -305,13 +305,13 @@ jobs:
           for i in 1 2 3 4 5; do
             if docker run --pull=always -d \
                  --tmpfs /var/www/html:size=512m \
-                 --restart unless-stopped \                 
-                 SHUTDOWN_TIMEOUT = "00:10:00"\
+                 --restart unless-stopped \
                  $DNS_FLAGS \
                  $ADD_HOST_FLAGS \
                  $USER_ENV_FLAGS \
                  -v "$CA_BUNDLE:/etc/ssl/certs/ca-certificates.crt:ro" \
                  -v "$TESTBED_MOUNT_DATA:/var/www/html/fp-content/content/import-in" \
+                 -e SHUTDOWN_TIMEOUT="00:10:00" \
                  -e FLATPRESS_URL="$FLATPRESS_URL" \
                  -e PLUGIN_URL="$PLUGIN_URL" \
                  -e PLUGIN_AUTH_HEADER="$PLUGIN_AUTH_HEADER" \
