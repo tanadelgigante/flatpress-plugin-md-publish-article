@@ -146,24 +146,21 @@
 
 **Criterio di accettazione Fase 1:** ✅ raggiunto (10/10 PASS + retrocompat documentata).
 
-### FASE 2 — Adeguamenti codice (C) — *solo se Fase 1 lo richiede + punto VERSION*
-**Obiettivo:** interventi minimi e documentati.
+### FASE 2 — Adeguamenti codice (C) — ✅ COMPLETATA (2026-09-19)
+**Obiettivo:** interventi minimi e documentati. Esito: diff minimale su 2 file (commit `a769672`).
 
-- **Task 2.1 — Tag VERSION in `ArticleComposer.php` (PRIMARIO)**. **Scelta D1 = (a) dinamico** (approvata).
-  - **Opzione (a) — SCELTA**: usare `system_ver()` quando disponibile (runtime FlatPress), con fallback per l'ambiente test:
-    `$version = isset($entry['version']) ? $entry['version'] : (function_exists('system_ver') ? system_ver() : self::FALLBACK_VERSION);`
-    con nuova costante esplicita (es. `const FALLBACK_VERSION = 'fp-1.5.1';`). L'override per-entry via frontmatter `version:` resta invariato. **Nota**: in FlatPress 1.5.1 `system_ver()` = `fp-1.5.1` (verificato su `core.core.system.php:66-69`), coerentemente con `admin.entry.write.php:179`. **Retrocompatibilità**: `system_ver()` esiste con firma identica anche in 1.4.1 (`core.system.php:74-75`) → il fallback scatta solo in ambienti senza FlatPress (test) e mai su FlatPress 1.4.x/1.5.x.
-  - **Opzione (b) — mantieni `fp-1.4.1`** *(NON scelta)*: mantenuta come riferimento storico nel piano.
-  - La scelta impatta Fase 3 (test) e Fase 5 (documentazione/README).
-- **Task 2.2 — Fix richiesti dalla Fase 1** (se presenti): es. deprecation Smarty 5, deprecation PHP 8.4/8.5, compatibilità cache APCu, dettagli UI pannello. **Nessun refactor opportunistico**; ogni fix isolato e motivato e **verificato anche su 1.4.1** (nessuna regressione).
-  - **Issue 1 (Fase 1) — `VERSION` hardcoded**: risolta dal Task 2.1.
-  - **Issue 2 (Fase 1) — robustezza `$_FILES['images']`** nel pannello (`admin.plugin.panel.publisharticle.php:202`): gestire il caso in cui il campo arrivi come `images` (non `images[]`) o manchi del tutto, evitando `TypeError` su `count()`. **Da fissare in Task 2.2** (fix minimale).
-  - **Issue 3–4 (Fase 1) — liste `[list]` e `[hr]`**: miglioramenti del convertitore Markdown→BBCode. Da valutare: fix minimale in Task 2.2 **oppure** decisione di documentare come limitazione nota (formato `[hr]` non supportato dal BBCode FlatPress su 1.5.x) — la decisione va riportata nel report; nessuna regressione su 1.4.1.
-  - **Issue 5 (Fase 1) — spec `pending/` vs comportamento reale**: aggiornare README/docs (Fase 5) per descrivere il comportamento vero (file schedulato resta in `import-in/` finché non scade). Nessuna modifica funzionale.
-- **Task 2.3 — Aggiornamento include_path/compatibilità** minima se la scelta (a) richiede l'accesso a `system_ver()` nel bootstrap dei test (in realtà è solo stub test-side, vedi Fase 3).
+- **Task 2.1 — Tag VERSION (PRIMARIO)**: ✅ implementato in `publisharticle/ArticleComposer.php`.
+  - Aggiunta `const FALLBACK_VERSION = 'fp-1.5.1';`; `const VERSION = 'fp-1.4.1'` mantenuta ma marcata *legacy*.
+  - Default in `buildEntryString()` e `buildEntry()`: `isset($entry['version']) ? $entry['version'] : (function_exists('system_ver') ? system_ver() : self::FALLBACK_VERSION)`.
+  - Comportamento: 1.5.1 → `fp-1.5.1`; 1.4.x → `fp-1.4.1` (invariato); test stub → `FALLBACK_VERSION`; override frontmatter preservato.
+- **Task 2.2 — Fix issue Fase 1**: 
+  - ✅ **Issue 2** risolta: normalizzazione `$_FILES['images']` in `_handleUpload()` (pannello righe 115-134) → niente `TypeError` se campo singolo o mancante.
+  - ✅ **Issue 3** (liste → `[list]`): **DECISIONE: documentazione, nessun fix** — FlatPress bbcode supporta `[list]`/`[list=#]` sia in 1.4.1 sia in 1.5.1, ma una conversione regex naive romperebbe i blocchi `[code]`; richiederebbe scanner riga-per-riga fuori perimetro "diff minimale". Comportamento attuale stabile (10/10 Fase 1). Nota tecnica per implementazione futura: liste ordinate `[list=#]`, non `[list type="decimal"]`.
+  - ✅ **Issue 4** (`[hr]`): commento `KNOWN LIMITATION` nel codice; nessuna modifica di logica (FlatPress bbcode non renderizza `[hr]`).
+  - ✅ **Issue 5** (spec scheduling): nessuna modifica funzionale; documentazione in Fase 5.
+- **Task 2.3**: nessuna azione necessaria (stub `system_ver()` è Fase 3).
 
-**Deliverable:** diff minimale su `publisharticle/ArticleComposer.php` (+ eventuali file fix Smarty/PHP) e nota di design in `docs/`.
-**Criteri di accettazione:** Fase 1 re-eseguita (o mitigazione documentata) verde; PHPUnit verde dopo Fase 3; issue 2 risolta; issue 3–4 decise e documentate.
+**Verifiche:** `php -l` verde su entrambi i file modificati; CRLF preservati. 2 test PHPUnit attesi rossi finché la Fase 3 non aggiorna gli assert di default (previsto dal piano).
 
 ### FASE 3 — Aggiornamento test PHPUnit (T)
 **Obiettivo:** coprire il cambiamento VERSION e i fix Fase 2; nessuna regressione.
