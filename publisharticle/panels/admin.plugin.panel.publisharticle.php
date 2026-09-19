@@ -112,6 +112,27 @@ if (class_exists('AdminPanelAction')) {
 				return;
 			}
 
+			// ── Normalize the images upload field ──
+			// The form posts this field as images[] (array). A client sending a
+			// single "images" field makes PHP populate $_FILES['images'] with
+			// scalar values, so count($_FILES['images']['name']) would raise a
+			// TypeError. Normalize to the array form here; the regular
+			// "images[]" case is left untouched.
+			if (
+				isset($_FILES['images']) &&
+				is_array($_FILES['images']) &&
+				isset($_FILES['images']['name']) &&
+				!is_array($_FILES['images']['name'])
+			) {
+				$_FILES['images'] = array(
+					'name'     => array($_FILES['images']['name']),
+					'type'     => array(isset($_FILES['images']['type']) ? $_FILES['images']['type'] : ''),
+					'tmp_name' => array($_FILES['images']['tmp_name']),
+					'error'    => array($_FILES['images']['error']),
+					'size'     => array(isset($_FILES['images']['size']) ? $_FILES['images']['size'] : 0),
+				);
+			}
+
 			// ── Check if future scheduled and not publish_now ──
 			$parser = new ArticleParser();
 			$parsed = $parser->parseMarkdown($mdContent);

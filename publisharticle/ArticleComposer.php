@@ -12,7 +12,14 @@ require_once 'ArticleParser.php';
  */
 class ArticleComposer {
 
+    // Legacy constant kept for backward compatibility. It is no longer used
+    // as the default entry version (see FALLBACK_VERSION), but is preserved
+    // so existing references to ArticleComposer::VERSION do not break.
     const VERSION = 'fp-1.4.1';
+
+    // Fallback version used when FlatPress' system_ver() is not available
+    // (e.g. unit-test bootstrap running outside the FlatPress runtime).
+    const FALLBACK_VERSION = 'fp-1.5.1';
 
     /**
      * Generates a FlatPress entry ID from a UNIX timestamp.
@@ -29,8 +36,9 @@ class ArticleComposer {
      * Builds the serialized entry string in FlatPress format.
      * Uses pipe-delimited key|value pairs with UPPERCASE keys.
      *
-     * Format example:
-     * VERSION|fp-1.4.1|SUBJECT|Title|CONTENT|...|AUTHOR|admin|DATE|1769020790|CATEGORIES|5,15|
+     * Format example (version is dynamic: system_ver() when running inside
+     * FlatPress, e.g. fp-1.5.1 on 1.5.x, otherwise FALLBACK_VERSION):
+     * VERSION|fp-1.5.1|SUBJECT|Title|CONTENT|...|AUTHOR|admin|DATE|1769020790|CATEGORIES|5,15|
      *
      * @param array $entry Associative array with keys: subject, content, author, date, categories
      * @return string Serialized entry string
@@ -39,7 +47,12 @@ class ArticleComposer {
         $pairs = [];
 
         // VERSION
-        $version = isset($entry['version']) ? $entry['version'] : self::VERSION;
+        // Default to the current FlatPress runtime version via system_ver()
+        // (e.g. fp-1.5.1 on 1.5.x, fp-1.4.1 on 1.4.x); when no FlatPress
+        // runtime is available (e.g. unit tests) fall back to FALLBACK_VERSION.
+        $version = isset($entry['version'])
+            ? $entry['version']
+            : (function_exists('system_ver') ? system_ver() : self::FALLBACK_VERSION);
         $pairs[] = 'VERSION|' . $version;
 
         // SUBJECT
@@ -103,6 +116,9 @@ class ArticleComposer {
         }, $text);
 
         // Horizontal rules: --- or *** on an isolated line
+        // KNOWN LIMITATION: FlatPress' bbcode plugin (1.4.x and 1.5.x) has no
+        // [hr] tag, so [hr] stays literal in the rendered article. The tag is
+        // kept for compatibility with the plugin's existing output format.
         $text = preg_replace('/^(?:---|\*\*\*)\s*$/m', '[hr]', $text);
 
         // Bold: **text** or __text__ -> [b]text[/b]
@@ -295,7 +311,7 @@ class ArticleComposer {
      * Combines parsed properties with converted content.
      *
      * Supported frontmatter keys:
-     * - version     (default fp-1.4.1)
+     * - version     (default: system_ver() if available, else FALLBACK_VERSION)
      * - subject     (alias: title)
      * - author      (default admin)
      * - date        (entry date)
@@ -308,7 +324,9 @@ class ArticleComposer {
      */
     public function buildEntry($properties, $markdownContent, $defaultTimestamp) {
         return [
-            'version'    => isset($properties['version']) ? $properties['version'] : self::VERSION,
+            'version'    => isset($properties['version'])
+                ? $properties['version']
+                : (function_exists('system_ver') ? system_ver() : self::FALLBACK_VERSION),
             'subject'    => isset($properties['subject'])
                 ? $properties['subject']
                 : (isset($properties['title']) ? $properties['title'] : ''),
