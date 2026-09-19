@@ -162,20 +162,22 @@
 
 **Verifiche:** `php -l` verde su entrambi i file modificati; CRLF preservati. 2 test PHPUnit attesi rossi finché la Fase 3 non aggiorna gli assert di default (previsto dal piano).
 
-### FASE 3 — Aggiornamento test PHPUnit (T)
-**Obiettivo:** coprire il cambiamento VERSION e i fix Fase 2; nessuna regressione.
+### FASE 3 — Aggiornamento test PHPUnit (T) — ✅ COMPLETATA (2026-09-19)
+**Obiettivo:** coprire il cambiamento VERSION e i fix Fase 2; nessuna regressione. Esito: suite **verde**, commit `4ee2ba1`, +4 test.
 
-- **Task 3.1 — `tests/bootstrap.php`**: se opzione (a), aggiungere stub `system_ver()` che restituisce una versione deterministica (es. `fp-1.5.1`) per simulare il runtime FlatPress (oggi manca — rilevato in §2.3).
-- **Task 3.2 — `ArticleComposerTest.php`**: aggiornare gli assert del default versione (righe ~40, 66, 146). Nuovi casi:
-  - default con `system_ver` stub → `fp-1.5.1` (o valore deciso);
-  - fallback senza `system_ver` (se previsto) → `FALLBACK_VERSION`;
-  - override frontmatter `version:` preservato;
-  - legacy: un'entry `fp-1.4.1` serializzata è ancora letta correttamente dal parser (caso "formato invariato").
-- **Task 3.3 — Esecuzione suite**: `vendor/bin/phpunit --testdox` su PHP 8.4 (CI) e, se disponibile, PHP 8.5 locale; `php -l` su tutti i file modificati.
-- **Task 3.4 — Test manuali di regressione** su testbed (1.5.1) per i flussi chiave modificati dal tag VERSION (controllo valore VERSION nell'entry scritta).
+- **Task 3.1 — Stub `system_ver()`**: ✅ in `tests/bootstrap.php` (stub globale → `fp-1.5.1`, guard `if (!function_exists(...))`).
+- **Task 3.2 — `ArticleComposerTest.php`**: ✅ aggiornati gli assert di default (righe ~66, ~146 → `fp-1.5.1`) + 4 nuovi test:
+  - default con `system_ver` stub → `fp-1.5.1`;
+  - fallback senza `system_ver` → `FALLBACK_VERSION` via **probe in processo PHP isolato** (`tests/fixtures/fallback_entry.php`, senza bootstrap);
+  - override frontmatter `version:` preservato (valori arbitrari `fp-1.6.0`/`fp-1.4.1`);
+  - legacy: entry `fp-1.4.1` serializzata ancora letta dal parser.
+- **Task 3.3 — Esecuzione suite**: ✅ eseguita su filesystem locale ext4 (hang I/O del mount 9p evitato); `php -l` verde su tutti i file modificati; **warning pre-esistente** (`mkdir(): Permission denied` nel test read-only) gestito con error handler temporaneo nel test + assert di guard → suite verde anche da utente non-root (da root/CI resta skip, invariato). **Risultato: 101 test / 271 assertions, OK, exit 0**, 0 failure/error/risky/warning (failOnRisky + failOnWarning attivi).
+- **Task 3.4 — Regressione testbed 1.5.1**: ✅ eseguita. Plugin aggiornato sul testbed; entry di prova `T8` → `VERSION|fp-1.5.1|…` ✅; tutte le entry legacy `fp-1.4.1` (Fase 1) ancora renderizzate in homepage ✅ (formato invariato).
 
-**Deliverable:** test aggiornati + report di esecuzione.
-**Criteri di accettazione:** suite verde (phpunit ^10||^11, PHP 8.4); nessun test `risky`/`warning` (phpunit.xml ha `failOnRisky="true"` e `failOnWarning="true"`); valore VERSION nell'entry verificato su testbed.
+**Confronto baseline:** 97 test / 253 assert (con 2 failure + 1 warning, exit 1) → **101 test / 271 assert, verde, exit 0**.
+
+**Deliverable:** test aggiornati committati (`4ee2ba1`) + report esecuzione.
+**Criterio di accettazione:** ✅ raggiunto (suite verde con failOnRisky/failOnWarning; VERSION `fp-1.5.1` verificato su testbed).
 
 ### FASE 4 — CI/CD: implementazione tag `[skip-ci]` (C, T)
 **Obiettivo:** push con `[skip-ci]` non esegue job superflui; nessuna interruzione delle release.
