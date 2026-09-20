@@ -3,7 +3,7 @@
  * Plugin Name: Publish Markdown Article Plugin
  * Plugin URI: https://www.flatpress.org
  * Description: Allows publishing articles from Markdown files with properties, with configurable import folder and import frequency.
- * Version: 0.9
+ * Version: 1.0
  * Author: Il Gigante
  */
 
