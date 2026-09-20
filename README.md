@@ -113,7 +113,7 @@ The plugin runs on FlatPress **1.4.x** and **1.5.x** (verified on 1.5.1, PHP 8.x
 | 1.5.x | `fp-1.5.1` — dynamic via `system_ver()` (fallback `fp-1.5.1`) | Verified checklist 10/10; Smarty 5 |
 | 1.4.x | `fp-1.4.1` — dynamic via `system_ver()` | Retro-compatible; same entry format |
 
-Legacy entries marked `fp-1.4.1` remain readable on both major versions. The `test-manual/fp151-compat-report.md` report (present in the working copy, git-ignored) documents the 1.5.1 verification.
+Legacy entries marked `fp-1.4.1` remain readable on both major versions. The `docs/fp151-compat-report.md` report documents the 1.5.1 verification.
 
 ## CI/CD and the `[skip-ci]` Tag
 
@@ -147,7 +147,7 @@ The `log_level` plugin option (admin panel) controls verbosity:
 - Wiki: <https://github.com/tanadelgigante/flatpress-plugin-md-publish-article/wiki>
 - `docs/flatpress_plugin_docs.md` — “Creating a FlatPress Plugin” guide
 - `docs/WORKPLAN.md` — work plan and decisions D1-D5
-- `test-manual/fp151-compat-report.md` — FlatPress 1.5.1 compatibility report (working copy, git-ignored)
+- `docs/fp151-compat-report.md` — FlatPress 1.5.1 compatibility report
 
 ## Contact
 

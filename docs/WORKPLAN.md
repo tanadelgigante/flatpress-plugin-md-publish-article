@@ -123,7 +123,7 @@
 **Obiettivo:** dimostrare (o smentire) la piena compatibilità funzionale su 1.5.1 senza modifiche.
 
 - **Task 1.1 — Allestimento ambiente**: ✅ eseguito con installazione locale su filesystem ext4 (`/home/alessio/fp-test-151`) + `php -S localhost:8017` (PHP 8.3.6 CLI), setup web completato, plugin attivato (copia in `fp-plugins/publisharticle`). *(Testbed docker CI non usato: richiede vars non disponibili localmente.)*
-- **Task 1.2 — Checklist funzionale manuale**: ✅ **10/10 PASS** su 1.5.1 (dettagli nel report `test-manual/fp151-compat-report.md`).
+- **Task 1.2 — Checklist funzionale manuale**: ✅ **10/10 PASS** su 1.5.1 (dettagli nel report `docs/fp151-compat-report.md`).
   1. Pannelli admin (publisharticle + pubartcfg) renderizzano con Smarty 5 — HTTP 200, nessun errore.
   2. Upload `.md` → entry creata, sidecar `view_counter` ok.
   3. Import da `import-in/` → file in `done/`; schedulato resta in `import-in/` (comportamento reale: **non va in `pending/`** finché non scade — spec da chiarire, vedi issue 5).
@@ -134,7 +134,7 @@
   8. APCu assente → non applicabile; entry visibili in index.
   9. Homepage, RSS2 e Atom ok (`<item>` presenti).
   10. Sweep E_ALL su 11 URL senza warning/deprecation PHP/ Smarty.
-- **Task 1.3 — Report**: ✅ `test-manual/fp151-compat-report.md` completo con evidenze e issues.
+- **Task 1.3 — Report**: ✅ `docs/fp151-compat-report.md` completo con evidenze e issues.
 - **Task 1.4 — Check retrocompatibilità su 1.4.1**: ✅ **confronto statico** (API identiche: `CONTENT_DIR`/`IMAGES_DIR`, `system_ver()`, `plugin_getoptions()`, `admin_addpanelaction()`); formato entry scritto = nativo 1.4.x, letto senza errori da 1.5.1 → **retrocompatibile**.
 
 **Issue emerse → Fase 2:**
