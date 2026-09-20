@@ -144,7 +144,7 @@ The `log_level` plugin option (admin panel) controls verbosity:
 
 ## Documentation
 
-- Gitea wiki: <https://repo.kenshiro.lab.tana/tanadelgigante/flatpress-plugin-md-publish-article/wiki>
+- Wiki: <https://github.com/tanadelgigante/flatpress-plugin-md-publish-article/wiki>
 - `docs/flatpress_plugin_docs.md` — “Creating a FlatPress Plugin” guide
 - `docs/WORKPLAN.md` — work plan and decisions D1-D5
 - `test-manual/fp151-compat-report.md` — FlatPress 1.5.1 compatibility report (working copy, git-ignored)
