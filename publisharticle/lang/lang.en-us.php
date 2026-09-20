@@ -84,6 +84,13 @@ $lang ['admin'] ['plugin'] ['pubartcfg'] = array(
 
 	'failed_subdir'      => 'Failed subdirectory',
 	'failed_subdir_help' => 'Subfolder of the import folder where files that failed to import are moved for inspection.',
+
+	'log_level'      => 'Log level',
+	'log_level_help' => 'Verbosity of the [publisharticle] log lines written to the PHP error log. "warn" logs warnings and errors only, "info" adds the standard messages, "debug" adds the full detail.',
+	'log_debug' => 'Debug',
+	'log_info'  => 'Info',
+	'log_warn'  => 'Warnings only',
+
 	'msgs' => array(
 		 1  => 'Settings saved successfully.',
 		-1  => 'Settings could not be saved.',

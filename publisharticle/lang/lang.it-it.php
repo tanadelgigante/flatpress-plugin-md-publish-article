@@ -84,6 +84,13 @@ $lang ['admin'] ['plugin'] ['pubartcfg'] = array(
 
 	'failed_subdir'      => 'Sottocartella failed',
 	'failed_subdir_help' => 'Sottocartella della cartella di import in cui vengono spostati i file che non sono stati importati per ispezione.',
+
+	'log_level'      => 'Livello di log',
+	'log_level_help' => 'Verbosità delle righe di log [publisharticle] scritte nel log di errore PHP. "warn" registra solo avvisi ed errori, "info" aggiunge i messaggi standard, "debug" aggiunge tutti i dettagli.',
+	'log_debug' => 'Debug',
+	'log_info'  => 'Info',
+	'log_warn'  => 'Solo avvisi',
+
 	'msgs' => array(
 		 1  => 'Impostazioni salvate con successo.',
 		-1  => 'Impossibile salvare le impostazioni.',

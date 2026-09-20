@@ -85,6 +85,7 @@ require_once 'CategoryResolver.php';
 require_once 'ImageUploader.php';
 require_once 'ArticleProcessor.php';
 require_once 'ArticleImporter.php';
+require_once 'PublishArticleLogger.php';
 
 // Load the plugin file so the cron matcher functions are available.
 // The plugin's require_once statements will be no-ops (already loaded).

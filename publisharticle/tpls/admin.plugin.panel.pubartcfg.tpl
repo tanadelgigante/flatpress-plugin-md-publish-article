@@ -68,6 +68,17 @@
 		<p class="form-help">{$plang.failed_subdir_help}</p>
 	</dd>
 
+	<!-- Log Level -->
+	<dt><label for="log_level">{$plang.log_level}</label></dt>
+	<dd>
+		<select name="log_level" id="log_level">
+			<option value="debug"{if $log_level == 'debug'} selected{/if}>{$plang.log_debug}</option>
+			<option value="info"{if $log_level == 'info'} selected{/if}>{$plang.log_info}</option>
+			<option value="warn"{if $log_level == 'warn'} selected{/if}>{$plang.log_warn}</option>
+		</select>
+		<p class="form-help">{$plang.log_level_help}</p>
+	</dd>
+
 </dl>
 
 <p>

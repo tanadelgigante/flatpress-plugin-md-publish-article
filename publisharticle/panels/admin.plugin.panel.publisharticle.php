@@ -10,12 +10,36 @@
  *   - Publication date
  *
  * Plus a live preview and bulk import from folder.
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API used:
+ *   - AdminPanelAction base class + admin_addpanelaction() registration
+ *   - plugin_getdir(), plugin_getoptions(), $this->smarty->assign()
+ *   - ArticleImporter/ArticleProcessor for the actual import work
+ *
+ * Edge cases handled here:
+ *   - a single "images" POST field is normalized from scalar to the array
+ *     form, otherwise count() would raise a TypeError on PHP >= 8 (legacy
+ *     clients that do not post images[] as an array);
+ *   - future-dated articles (not "publish now", not a draft) are saved into
+ *     the import folder so the cron importer picks them up when due;
+ *   - image file names are sanitized with [^a-zA-Z0-9_.\-] -> '_' before use.
+ *
+ * Logging (PublishArticleLogger, Task 5.2): filesystem failures while saving
+ * scheduled articles/images to the import folder are reported at WARN/ERROR
+ * level (the old bare error_log('publisharticle: ...') calls). Everything
+ * else stays silent: the panel only surfaces feedback via Smarty messages.
+ * ---------------------------------------------------------------------------
  */
 
 if (class_exists('AdminPanelAction')) {
 
 	require_once plugin_getdir('publisharticle')
 		. 'ArticleImporter.php';
+	require_once plugin_getdir('publisharticle')
+		. 'PublishArticleLogger.php';
 
 	class admin_plugin_publisharticle extends AdminPanelAction {
 
@@ -150,7 +174,7 @@ if (class_exists('AdminPanelAction')) {
 				$importDir = $importer->getImportDir();
 
 				if (!$importer->ensureImportDir()) {
-					error_log('publisharticle: import dir unavailable or not writable: ' . $importDir);
+					publisharticle_log('warn', __METHOD__ . ': import dir unavailable or not writable: ' . $importDir);
 					$this->smarty->assign('success', -1);
 					return;
 				}
@@ -158,7 +182,7 @@ if (class_exists('AdminPanelAction')) {
 				$destMd = $importDir . $origName;
 				if (!move_uploaded_file($tmpMd, $destMd)) {
 					if (!copy($tmpMd, $destMd)) {
-						error_log('publisharticle: cannot save scheduled article to import dir: '
+						publisharticle_log('warn', __METHOD__ . ': cannot save scheduled article to import dir: '
 							. $destMd . ' — ' . (error_get_last() ? error_get_last()['message'] : ''));
 						$this->smarty->assign('success', -1);
 						return;
@@ -167,7 +191,7 @@ if (class_exists('AdminPanelAction')) {
 				}
 
 				if (!is_file($destMd) || !is_readable($destMd)) {
-					error_log('publisharticle: scheduled article missing after upload: ' . $destMd);
+					publisharticle_log('error', __METHOD__ . ': scheduled article missing after upload: ' . $destMd);
 					$this->smarty->assign('success', -1);
 					return;
 				}
@@ -186,7 +210,7 @@ if (class_exists('AdminPanelAction')) {
 							$destImg = $importDir . $safeImgName;
 							if (!move_uploaded_file($_FILES['images']['tmp_name'][$i], $destImg)) {
 								if (!copy($_FILES['images']['tmp_name'][$i], $destImg)) {
-									error_log('publisharticle: cannot save image to import dir: '
+									publisharticle_log('warn', __METHOD__ . ': cannot save image to import dir: '
 										. $destImg . ' — ' . (error_get_last() ? error_get_last()['message'] : ''));
 								} else {
 									@unlink($_FILES['images']['tmp_name'][$i]);

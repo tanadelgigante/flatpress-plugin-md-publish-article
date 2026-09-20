@@ -1,6 +1,6 @@
 # Publish Article Plugin for FlatPress
 
-The **Publish Article** plugin allows you to publish articles to FlatPress by simply uploading Markdown files to a designated folder.
+The **Publish Article** plugin allows you to publish articles to FlatPress by simply uploading Markdown files to a designated folder. It is compatible with FlatPress **1.4.x** and **1.5.x** (PHP 8.x; verified on 1.5.1).
 
 ## Installation
 
@@ -35,7 +35,7 @@ fp-plugins/
 
 ### ⚙️ Workflow & Automation
 * **Frontmatter Support**: Use YAML-like headers to control article metadata:
-    * `version` — version of the entry format (default `fp-1.4.1`).
+    * `version` — version of the entry format. The default is **dynamic**: `system_ver()` when the FlatPress runtime is loaded (e.g. `fp-1.5.1` on 1.5.x, `fp-1.4.1` on 1.4.x), with fallback `fp-1.5.1` (`FALLBACK_VERSION`, in `ArticleComposer`) outside FlatPress; override it per entry with this field.
     * `subject` (alias `title`) — entry title.
     * `author` — entry author (default `admin`).
     * `date` — entry date (also used for the Entry ID).
@@ -60,6 +60,7 @@ Settings are available in **Manage → Plugins → Publish Article**:
 | `default_status` | `publish` | Default status (`publish` or `draft`). |
 | `done_subdir` | `done` | Subfolder for successfully processed files. |
 | `failed_subdir` | `failed` | Subfolder for files that failed to import. |
+| `log_level` | `info` | Log verbosity (`debug`, `info`, `warn`); WARN/ERROR/FATAL always logged. See [Logging](#logging). |
 
 ### 🔒 Security
 
@@ -102,6 +103,51 @@ Check this image with attributes:
 And a protocol-relative URL:
 //example.com/style.css
 ```
+
+## Compatibility
+
+The plugin runs on FlatPress **1.4.x** and **1.5.x** (verified on 1.5.1, PHP 8.x).
+
+| FlatPress | Entry `VERSION` | Notes |
+| --- | --- | --- |
+| 1.5.x | `fp-1.5.1` — dynamic via `system_ver()` (fallback `fp-1.5.1`) | Verified checklist 10/10; Smarty 5 |
+| 1.4.x | `fp-1.4.1` — dynamic via `system_ver()` | Retro-compatible; same entry format |
+
+Legacy entries marked `fp-1.4.1` remain readable on both major versions. The `test-manual/fp151-compat-report.md` report (present in the working copy, git-ignored) documents the 1.5.1 verification.
+
+## CI/CD and the `[skip-ci]` Tag
+
+The Gitea Actions workflow (`.gitea/workflows/ci.yml`) skips unnecessary jobs when the head commit message contains the token **`[skip-ci]`**.
+
+- Push with `[skip-ci]` in the (head) commit message → `lint` and `test` jobs are skipped, together with their downstream jobs.
+- **Option B**: with `[skip-ci]` every job is skipped, **including the `release` job on a `v*` tag**. A release can still happen on a tag whose commit has no token, or manually via `workflow_dispatch job=release`.
+- `workflow_dispatch` runs are **never** skipped (explicit manual trigger).
+- The post-release bump commit automatically carries the token, e.g.:
+
+    `Bump version to 1.0.1-SNAPSHOT after release v1.0.0 [skip-ci]`
+
+## Logging
+
+The plugin logs to PHP's `error_log()` with the `[publisharticle]` prefix, in the format:
+
+    [publisharticle] <LEVEL> <message> [key=value ...]
+
+The `log_level` plugin option (admin panel) controls verbosity:
+
+| `log_level` | Emits |
+| --- | --- |
+| `debug` | DEBUG + INFO + WARN + ERROR + FATAL |
+| `info` (default) | INFO + WARN + ERROR + FATAL |
+| `warn` | WARN + ERROR + FATAL |
+
+**WARN, ERROR and FATAL are always active** in any configuration. Implementation: `PublishArticleLogger.php` plus the `publisharticle_log($level, $message, $context)` helper.
+
+## Documentation
+
+- Gitea wiki: <https://repo.kenshiro.lab.tana/tanadelgigante/flatpress-plugin-md-publish-article/wiki>
+- `docs/flatpress_plugin_docs.md` — “Creating a FlatPress Plugin” guide
+- `docs/WORKPLAN.md` — work plan and decisions D1-D5
+- `test-manual/fp151-compat-report.md` — FlatPress 1.5.1 compatibility report (working copy, git-ignored)
 
 ## Contact
 

@@ -3,9 +3,28 @@
  * Publish Article – Configuration panel
  *
  * Registered under the "plugin" admin panel.
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API used:
+ *   - AdminPanelAction base class + admin_addpanelaction() registration
+ *   - plugin_getoptions(), plugin_addoption(), plugin_saveoptions()
+ *   - publisharticle_valid_cron() for the custom cron expression
+ *
+ * Options handled here (all saved through the FlatPress plugin API):
+ *   - import_folder, import_frequency (+ custom cron), default_category,
+ *     default_status, done_subdir, failed_subdir
+ *   - log_level (Task 5.2): 'debug' | 'info' | 'warn', default 'info'.
+ *     The value is normalized via PublishArticleLogger::normalizeLevel()
+ *     when the logger class is available, otherwise it falls back to 'info'.
+ * ---------------------------------------------------------------------------
  */
 
 if (class_exists('AdminPanelAction')) {
+
+	require_once plugin_getdir('publisharticle')
+		. 'PublishArticleLogger.php';
 
 	/**
 	 * FlatPress action class.
@@ -46,6 +65,7 @@ if (class_exists('AdminPanelAction')) {
 				'default_status'    => 'publish',
 				'done_subdir'       => 'done',
 				'failed_subdir'     => 'failed',
+				'log_level'         => 'info',
 			);
 
 			$options = plugin_getoptions('publisharticle');
@@ -163,6 +183,16 @@ if (class_exists('AdminPanelAction')) {
 			}
 
 			$options['import_frequency'] = $freq;
+
+			// Log level (Task 5.2). Normalized so a tampered/hand-edited
+			// request cannot inject an invalid threshold.
+			if (class_exists('PublishArticleLogger')) {
+				$options['log_level'] = PublishArticleLogger::normalizeLevel(
+					isset($_POST['log_level']) ? $_POST['log_level'] : 'info'
+				);
+			} else {
+				$options['log_level'] = 'info';
+			}
 
 			// Save all options using the FlatPress plugin API.
 			foreach ($options as $key => $value) {

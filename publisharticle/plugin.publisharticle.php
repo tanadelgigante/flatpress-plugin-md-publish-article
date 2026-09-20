@@ -5,8 +5,41 @@
  * Description: Allows publishing articles from Markdown files with properties, with configurable import folder and import frequency.
  * Version: 1.0
  * Author: Il Gigante
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * This file is the FlatPress plugin entry point. It is a purely procedural
+ * module: FlatPress' plugin API is hook-based, and the two public hooks are
+ * registered at the bottom with add_action('init', ...):
+ *
+ *   - publisharticle_process_scheduled() : promotes future-dated entries
+ *     whose scheduled time has come (the "pending" directory).
+ *   - publisharticle_process_import()    : scans the import folder and
+ *     publishes due articles.
+ *
+ * FlatPress APIs used here (all guarded with function_exists where the
+ * runtime could be a plain unit test instead of FlatPress):
+ *
+ *   - plugin_getoptions('publisharticle')   -> read stored plugin options
+ *   - plugin_addoption(...) + plugin_saveoptions('publisharticle')
+ *       -> persist options (e.g. last_import_run)
+ *   - class_exists('AdminPanelAction')      -> conditionally register panels
+ *   - plugin_getdir('publisharticle')       -> absolute plugin folder
+ *   - add_action('init', ...)               -> hook registration
+ *
+ * The cron helpers (publisharticle_cron_*) live here because they are plain
+ * functions (FlatPress loads every php file of the plugin folder, so they are
+ * always available). They have no FlatPress dependency and are covered by the
+ * unit tests in tests/CronMatcherTest.php.
+ *
+ * Logging: leveled logging (see PublishArticleLogger.php) is used at the
+ * DEBUG/INFO level here because the hooks run on every page load; set the
+ * `log_level` option to 'warn' to silence routine messages.
+ * ---------------------------------------------------------------------------
  */
 
+require_once 'PublishArticleLogger.php';
 require_once 'ArticleProcessor.php';
 require_once 'ArticleImporter.php';
 
@@ -18,7 +51,12 @@ require_once 'ArticleImporter.php';
 /**
  * Load plugin options (merging with defaults).
  *
- * @return array
+ * Defaults are merged so that older installs (which have no log_level stored,
+ * for example) keep working without a migration step.
+ *
+ * FlatPress APIs: plugin_getoptions('publisharticle').
+ *
+ * @return array Merged options: defaults overridden by stored values.
  */
 function publisharticle_get_options() {
 	$defaults = array(
@@ -28,6 +66,7 @@ function publisharticle_get_options() {
 		'default_status'   => 'publish',
 		'done_subdir'      => 'done',
 		'failed_subdir'    => 'failed',
+		'log_level'        => 'info', // 'debug' | 'info' | 'warn' (WARN/ERROR/FATAL always logged)
 	);
 
 	$options = function_exists('plugin_getoptions') ? plugin_getoptions('publisharticle') : array();
@@ -49,13 +88,19 @@ function publisharticle_get_options() {
  *                          expression, and at most once per minute
  *                          (tracked via the last_import_run option)
  *
- * @param array $options Plugin options
+ * Edge cases:
+ * - a malformed / empty frequency falls back to 'every_page_load';
+ * - a cron run is allowed only once per minute slot (last_import_run is
+ *   persisted by publisharticle_process_import()).
+ *
+ * @param array $options Plugin options (see publisharticle_get_options)
  * @return bool
  */
 function publisharticle_should_import($options) {
 	$frequency = isset($options['import_frequency']) ? $options['import_frequency'] : 'every_page_load';
 
 	if ($frequency === 'manual') {
+		publisharticle_log('debug', __METHOD__ . ': frequency is manual, skipping');
 		return false;
 	}
 
@@ -65,6 +110,7 @@ function publisharticle_should_import($options) {
 
 	// Treat the value as a cron expression (5 fields: min hour dom mon dow)
 	if (!publisharticle_cron_matches($frequency, time())) {
+		publisharticle_log('debug', __METHOD__ . ': cron expression does not match now', array('expr' => $frequency));
 		return false;
 	}
 
@@ -322,6 +368,12 @@ function publisharticle_valid_cron($expr) {
 
 /**
  * Hook: init - imports articles from the import folder when due.
+ *
+ * FlatPressAPI: registered with add_action('init', ...). Runs on every page
+ * load, but publisharticle_should_import() gates the actual work according to
+ * the configured frequency. The last_import_run option is persisted with
+ * plugin_addoption()/plugin_saveoptions() so cron expressions fire at most
+ * once per time slot.
  */
 function publisharticle_process_import() {
 	$options = publisharticle_get_options();
@@ -331,8 +383,11 @@ function publisharticle_process_import() {
 	}
 
 	$importFolder = !empty($options['import_folder']) ? $options['import_folder'] : null;
+	publisharticle_log('info', __METHOD__ . ': import run started', array('folder' => $importFolder !== null ? $importFolder : '(default)'));
 	$importer = new ArticleImporter(null, $importFolder, $options);
-	$importer->importAll();
+	$results = $importer->importAll();
+
+	publisharticle_log('info', __METHOD__ . ': import run finished', array('files' => is_array($results) ? count($results) : 0));
 
 	// Remember the last run so cron expressions only fire once per slot
 	if (function_exists('plugin_addoption')) {
@@ -343,6 +398,10 @@ function publisharticle_process_import() {
 
 /**
  * Hook: init - promotes scheduled (future-dated) articles whose time has come.
+ *
+ * FlatPressAPI: registered with add_action('init', ...). Reads the pending
+ * directory (see ArticleWriter::getPendingDir()) and moves every due entry
+ * into the normal content tree via ArticleProcessor::processScheduled().
  */
 function publisharticle_process_scheduled() {
 	$processor = new ArticleProcessor();
@@ -351,6 +410,10 @@ function publisharticle_process_scheduled() {
 
 /**
  * Registers the admin panel when the AdminPanelAction class is available.
+ *
+ * FlatPressAPI: class_exists('AdminPanelAction') + plugin_getdir().
+ * The panel files are guarded because they extend the FlatPress base class
+ * and must not be parsed in a plain unit-test runtime.
  */
 if (class_exists('AdminPanelAction')) {
 	// Register admin panels
@@ -358,6 +421,8 @@ if (class_exists('AdminPanelAction')) {
 	require_once plugin_getdir('publisharticle') . 'panels/admin.plugin.panel.pubartcfg.php';
 }
 
-// Wire the hooks
+// Wire the hooks (FlatPressAPI: add_action('init', ...))
+// Note: both hooks run on every page load; the import hook is gated by the
+// configured frequency, the scheduler hook is a cheap directory scan.
 add_action('init', 'publisharticle_process_scheduled');
 add_action('init', 'publisharticle_process_import');

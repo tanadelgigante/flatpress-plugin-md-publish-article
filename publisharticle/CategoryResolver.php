@@ -1,5 +1,7 @@
 <?php
 
+require_once 'PublishArticleLogger.php';
+
 /**
  * CategoryResolver — traduzione NOME categoria -> ID numerico.
  *
@@ -14,6 +16,18 @@
  * Se un nome non viene trovato (o i file non sono disponibili),
  * il valore viene lasciato invariato: la traduzione potrà essere
  * completata in una fase successiva.
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API: CONTENT_DIR constant only; the serialized categories map is
+ * read with a defensive @unserialize() (the map may be missing, empty or
+ * malformed in a fresh install).
+ *
+ * Logging (PublishArticleLogger, Task 5.2): an unresolvable category NAME is
+ * logged at DEBUG level (the value is deferred, not an error); no log line is
+ * emitted for the common resolvable cases to keep the noise low.
+ * ---------------------------------------------------------------------------
  */
 class CategoryResolver {
 
@@ -102,6 +116,7 @@ class CategoryResolver {
         }
 
         // Not resolvable right now: leave the name for a later stage
+        publisharticle_log('debug', __METHOD__ . ': category name not resolved yet', ['name' => $value]);
         return $value;
     }
 

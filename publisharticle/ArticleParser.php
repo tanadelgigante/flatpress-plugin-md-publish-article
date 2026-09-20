@@ -7,6 +7,25 @@
  * - parsing del frontmatter Markdown (title, author, date, categories)
  * - parsing di una stringa entry FlatPress serializzata (KEY|value|...)
  * - conversione di date in timestamp UNIX
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API: NONE. This class only performs pure text manipulation, so it
+ * is fully unit-testable without a FlatPress runtime (used by the test suite
+ * and by ArticleWriter::updateIndex() to normalize an entry string).
+ *
+ * Edge cases:
+ * - the frontmatter block must start at the very beginning (^---); a markdown
+ *   article without frontmatter returns an empty property map;
+ * - $_FILES-style input is NOT handled here (no true arrays come in): the
+ *   plugin normalizes non-array $_FILES entries to [] and only arrays with a
+ *   non-empty 'tmp_name' are passed to ImageUploader by ArticleProcessor;
+ * - legacy FlatPress entries written by older plugin versions (entry strings
+ *   with fields after DATE) parse gracefully: unknown keys are skipped.
+ *
+ * No logging is performed by this class (pure parsing, no side effects).
+ * ---------------------------------------------------------------------------
  */
 class ArticleParser {
 

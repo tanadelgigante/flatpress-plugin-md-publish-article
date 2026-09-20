@@ -236,24 +236,20 @@ Meccanismo **esplicito e robusto** (indipendente da eventuale supporto nativo di
 | 7 | PR il cui titolo contiene `[skip-ci]` (se supportato) | `lint`/`test` skipped |
 Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
 
-### FASE 5 — Manutenibilità: commenti, logging e documentazione (C, T, W)
-**Obiettivo:** rendere il codice mantenibile e tutto documentato, come richiesto dall'utente (R18–R20). Nessuna modifica funzionale: è un'opera di rifinitura al termine dell'implementazione.
+### FASE 5 — Manutenibilità: commenti, logging e documentazione (C, T, W) — ✅ COMPLETATA
+**Obiettivo:** rendere il codice mantenibile e tutto documentato, come richiesto dall'utente (R18–R20). Nessuna modifica funzionale: è un'opera di rifinitura al termine dell'implementazione. Esito: R18–R20 soddisfatti.
 
-- **Task 5.1 — Commenti ampi nel codice** (C, R18): per ogni classe, metodo e funzione del plugin (tutti i file in `publisharticle/`) aggiungere/estendere commenti: docblock con scopo, parametri, ritorno, eccezioni/errori, riferimenti alle API FlatPress usate (`system_ver()`, `entry_dir()`, `entry_init()`, `plugin_getoptions`, ecc.) e note per i casi limite. Nessuna modifica di logica.
-- **Task 5.2 — Sistema di logging a livelli** (C, T, R19): introdurre una utility di log interna al plugin (es. `PublishArticleLog` o funzione `publisharticle_log($level, $message, $context=[])`) con:
-  - livelli: `DEBUG`, `INFO`, `WARN`, `ERROR`, `FATAL`;
-  - **soglia configurabile**: opzione plugin (panello config) `log_level` che ammette `debug`/`info` (disattivare anche `INFO` per ridurre il rumore); `WARN`/`ERROR`/`FATAL` **sempre attivi**;
-  - canale di output: `error_log()` di PHP (prefissato es. `[publisharticle] livello:`) — nessuna dipendenza esterna, retrocompatibile 1.4.x/1.5.x;
-  - logging puntuale nei flussi chiave: import progress (DEBUG), entrata/uscita fasi principali del processore (INFO), errori di scrittura/upload/parse (ERROR/FATAL), warning su cartelle non scrivibili (WARN);
-  - test (T): unit test della utility (filtro per soglia configurata, formato riga) e smoke test della configurazione `log_level` da pannello.
-- **Task 5.3 — Documentazione completa · wiki (W, R20)**:
-  - **Preferenza: wiki sul repository Gitea** (se disponibile per il repo `publisharticle`): creare la wiki con pagine collegate (Home, Installazione, Configurazione, Flusso di lavoro, CI/CD `[skip-ci]`, Compatibilità FlatPress 1.4.x/1.5.x, FAQ).
-  - **Fallback accettato: gerarchia Markdown in `docs/`** con indice centrale `docs/README.md` (o `docs/index.md`) che **linka tutti i file** già presenti e nuovi: questo WORKPLAN, `flatpress_plugin_docs.md`, il BBCode wiki salvato, nuove pagine di compatibilità e di CI/CD.
-  - In ogni caso tutti i documenti **si collegano tra loro**; la documentazione copre anche README (inglese) e release note.
-- **Task 5.4 — README.md** (W): aggiornare frontmatter `version` (default dinamico `system_ver()`), sezione compatibilità FlatPress (1.4.x + 1.5.1), sezione `[skip-ci]` (convenzione, eventi coperti, esempio `Bump version to ... [skip-ci]`), sezione logging (`log_level`).
+- **Task 5.1 — Commenti ampi nel codice (R18)**: ✅ completato dal Coder. Docblock estesi su tutte le classi/metodi/funzioni di `publisharticle/` (14 file modificati: 10 file core + 2 panels + 2 lang + tpl config) con scopo, parametri, ritorni, riferimenti alle API FlatPress, note sui casi limite (legacy `fp-1.4.1`, override `version:`, `$_FILES` non-array, `[hr]`, liste). Nessuna modifica di logica.
+- **Task 5.2 — Logging a livelli (R19)**: ✅ completato dal Coder.
+  - Nuovo `publisharticle/PublishArticleLogger.php` (classe statica + wrapper procedurale `publisharticle_log($level, $message, $context)` con guardie `class_exists`/`function_exists`). Livelli DEBUG<INFO<WARN<ERROR<FATAL; soglia da opzione plugin **`log_level`** (`debug`|`info`|`warn`, default `info`); WARN/ERROR/FATAL sempre attivi; canale `error_log()` prefisso `[publisharticle]`; testabilità via `capture()`/`release()` e `setLevel()`.
+  - Opzione `log_level` aggiunta al pannello config (`admin.plugin.panel.pubartcfg.php` + `tpls/admin.plugin.panel.pubartcfg.tpl` + label `lang/lang.en-us.php` e `lang/lang.it-it.php`).
+  - Log sostituiti/aggiunti nei flussi chiave: DEBUG (scan folder, frontmatter, validazioni), INFO (inizio/fine import, publish/schedule con id, entry/exit `process()`), WARN (dir non scrivibile, moveTo fallito, immagine non spostabile), ERROR (write fallita, archiviatura in-place). `updateIndex()` NON loggato (vincolo entry_index).
+  - Test: nuovo `tests/PublishArticleLoggerTest.php` (14 test).
+- **Task 5.3 — Wiki Gitea (R20)**: ✅ completata dal Writer. **Wiki su Gitea usata** (scelta D4, accesso verificato dall'Orchestratore il 2026-09-20). 8 pagine collegate nella barra di navigazione: Home (indice), Installazione, Configurazione, Flusso di lavoro, CI/CD skip-ci, Compatibilità FlatPress 1.4x-1.5x, FAQ, Limitazioni. URL Home: `https://repo.kenshiro.lab.tana/tanadelgigante/flatpress-plugin-md-publish-article/wiki/Home`. Push `5b72598..dc7da30`, verifica API: 8 pagine ✓. Mirror locale `/home/alessio/pa-wiki`.
+- **Task 5.4 — README.md**: ✅ aggiornato dal Writer (48+/-2). Aggiunte: compatibilità 1.4.x+1.5.x, VERSION dinamico, sezione `[skip-ci]`, sezione logging (`log_level`), link wiki+docs. CRLF preservati.
 
-**Deliverable:** codice commentato; utility log + test; wiki su Gitea **oppure** gerarchia `docs/` con indice e link incrociati; README aggiornato.
-**Criteri di accettazione:** R18–R20 soddisfatti: ogni classe documentata, log a livelli con soglia configurabile e WARN/ERROR/FATAL sempre attivi, documentazione linkata e completa; PHPUnit ancora verde dopo l'aggiunta dei test di logging; `php -l` pulito.
+**Deliverable:** codice commentato; logger + 14 test; wiki Gitea (8 pagine); README aggiornato.
+**Criteri di accettazione:** ✅ R18–R20 soddisfatti; `php -l` pulito su 15 file; **suite PHPUnit verde: 114 test / 306 assertion, exit 0** (1 skip invariato), verificata sul mirror ext4 `/home/alessio/pa-test`; wiki accessibile via API.
 
 ### FASE 6 — Release v1.0.0 (C, con approvazione utente)
 **Flusso (Opzione B + VERSION dinamico, coerentemente con le decisioni approvate):**

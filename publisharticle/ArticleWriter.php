@@ -1,6 +1,7 @@
 <?php
 
 require_once 'ArticleParser.php';
+require_once 'PublishArticleLogger.php';
 
 /**
  * ArticleWriter — logica di SALVATAGGIO.
@@ -10,6 +11,25 @@ require_once 'ArticleParser.php';
  * - creazione delle directory
  * - scrittura del file entry .txt
  * - creazione della cartella laterale con view_counter.txt
+ * - gestione degli articoli pianificati (pending directory)
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API:
+ *   - entry_dir($id)  -> path resolution (fallback manuale sui test)
+ *   - entry_init()    -> B+Tree index (search + categories)
+ *   - entry_index::add($id, $entry) -> index update
+ *   - do_action('publish_post', $id, $entry) -> FlatPress hooks
+ *
+ * Constraint: updateIndex() performs the entry_index flow described above and
+ * is intentionally NOT logged (no extra calls inside the index path).
+ *
+ * Logging (PublishArticleLogger, Task 5.2): filesystem failures (creating
+ * directories, writing .txt / view_counter.txt / pending files) are logged
+ * at ERROR level so a failed write can be spotted in the FlatPress log;
+ * successful writes are NOT logged here (the orchestrator logs them at INFO).
+ * ---------------------------------------------------------------------------
  */
 class ArticleWriter {
 
@@ -59,6 +79,7 @@ class ArticleWriter {
 
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create month directory', ['dir' => $dir, 'id' => $id]);
                 return false;
             }
         }
@@ -80,7 +101,11 @@ class ArticleWriter {
         }
 
         $filePath = $this->getEntryBasePath($id) . '.txt';
-        return file_put_contents($filePath, $content) !== false;
+        $ok = file_put_contents($filePath, $content) !== false;
+        if (!$ok) {
+            publisharticle_log('error', __METHOD__ . ': cannot write entry file', ['file' => $filePath, 'id' => $id]);
+        }
+        return $ok;
     }
 
     /**
@@ -138,11 +163,17 @@ class ArticleWriter {
 
         if (!is_dir($sidecarDir)) {
             if (!mkdir($sidecarDir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create view-counter dir', ['dir' => $sidecarDir, 'id' => $id]);
                 return false;
             }
         }
 
-        return file_put_contents($sidecarDir . '/view_counter.txt', (string) $value) !== false;
+        $viewCounter = $sidecarDir . '/view_counter.txt';
+        $ok = file_put_contents($viewCounter, (string) $value) !== false;
+        if (!$ok) {
+            publisharticle_log('error', __METHOD__ . ': cannot write view_counter.txt', ['file' => $viewCounter, 'id' => $id]);
+        }
+        return $ok;
     }
 
     /**
@@ -194,11 +225,16 @@ class ArticleWriter {
         $dir = $this->getPendingDir();
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create pending dir', ['dir' => $dir]);
                 return false;
             }
         }
         $file = $dir . $scheduledTs . '-' . $id . '.txt';
-        return file_put_contents($file, $content) !== false;
+        $ok = file_put_contents($file, $content) !== false;
+        if (!$ok) {
+            publisharticle_log('error', __METHOD__ . ': cannot write pending entry', ['file' => $file, 'id' => $id]);
+        }
+        return $ok;
     }
 
     /**
@@ -240,6 +276,7 @@ class ArticleWriter {
         $id = $this->findFreeEntryId($pending['id']);
         $content = file_get_contents($pending['file']);
         if ($content === false) {
+            publisharticle_log('error', __METHOD__ . ': cannot read pending entry', ['file' => $pending['file'], 'id' => $pending['id']]);
             return false;
         }
 

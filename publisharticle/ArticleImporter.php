@@ -1,6 +1,7 @@
 <?php
 
 require_once 'ArticleProcessor.php';
+require_once 'PublishArticleLogger.php';
 
 /**
  * ArticleImporter — importazione di articoli da una cartella.
@@ -22,6 +23,35 @@ require_once 'ArticleProcessor.php';
  * In questo modo gli articoli possono essere caricati via FTP/SFTP/scp
  * nella cartella di import, e il plugin li pubblica automaticamente
  * all'avvio (hook init).
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress APIs / constants used:
+ *   - CONTENT_DIR                       -> <content_root>/ content tree root
+ *   - plugin_getdir('publisharticle')   -> plugin folder (Caddy snippet source)
+ *   - ArticleProcessor::process()       -> delegates parse/publish to the
+ *                                          orchestrator (which in turn uses
+ *                                          entry_dir(), entry_init() etc.)
+ *
+ * Edge cases handled here:
+ *   - future-dated articles (scheduled): the source file is LEFT in the
+ *     import folder (markPending() is intentionally a no-op) so that scan()
+ *     re-picks it up once its time has come — see importFile();
+ *   - images with duplicate names / already-existing names fail the article
+ *     before anything is copied (importFolderImages() two-pass check);
+ *   - if moveTo() fails (read-only target dir), the file is archived in-place
+ *     with a ".done"/".failed" suffix so scan() never publishes it twice;
+ *   - the import folder is protected for the detected web server
+ *     (.htaccess for Apache/LiteSpeed, .caddy snippet for Caddy 2, manual
+ *     instructions for Nginx/unknown) — see protectImportDir()/deployCaddySnippet().
+ *
+ * Logging (PublishArticleLogger, Task 5.2):
+ *   - INFO  : per-file import start/finish, folder protection problems;
+ *   - DEBUG : files found by scan(), scheduled articles kept for re-scan;
+ *   - WARN  : moveTo()/archive fallbacks, non-writable folders, image moves;
+ *   - ERROR : in-place archival failure, failed final move without fallback.
+ * ---------------------------------------------------------------------------
  */
 class ArticleImporter {
 
@@ -102,17 +132,21 @@ class ArticleImporter {
      * Ensures the import directory exists (creates it if missing)
      * and deploys server-appropriate protection for its contents.
      *
+     * Failures are logged at WARN level: a missing/non-writable import folder
+     * is not fatal for the whole plugin, but the user must fix permissions
+     * for the folder importer to work.
+     *
      * @return bool True if the directory exists/was created and is protected
      */
     public function ensureImportDir() {
         if (!is_dir($this->importDir)) {
             if (!mkdir($this->importDir, 0755, true)) {
-                error_log(__METHOD__ . ': cannot create import dir: ' . $this->importDir);
+                publisharticle_log('warn', __METHOD__ . ': cannot create import dir: ' . $this->importDir);
                 return false;
             }
         }
         if (!is_writable($this->importDir)) {
-            error_log(__METHOD__ . ': import dir not writable: ' . $this->importDir
+            publisharticle_log('warn', __METHOD__ . ': import dir not writable: ' . $this->importDir
                 . ' — check ownership and permissions');
             return false;
         }
@@ -274,6 +308,15 @@ class ArticleImporter {
      *
      * Unlike importFile(), this does NOT move the source file.
      *
+     * Edge cases:
+     * - missing/unreadable file -> failure message in the result array;
+     * - selected images (overrides['images']) are imported with the article
+     *   base name as prefix (names are made unique by ImageUploader);
+     * - frontmatter overrides (status, pubdate) are injected via applyDefaults();
+     * - a future-dated article is still scheduled, but the source file stays
+     *   where it is (the admin panel copied/uploaded it into the import
+     *   folder when scheduling was requested).
+     *
      * @param string $file Absolute path to the .md file
      * @param array  $overrides Optional: status, pubdate, images
      * @return array Result with success, id, message, images
@@ -287,6 +330,8 @@ class ArticleImporter {
             'message' => '',
             'images' => [],
         ];
+
+        publisharticle_log('info', __METHOD__ . ': manual import requested', array('file' => $base));
 
         if (!is_file($file)) {
             $result['message'] = 'File not found.';
@@ -346,10 +391,16 @@ class ArticleImporter {
     /**
      * Scans the import folder for Markdown files.
      *
+     * Only files with a recognized Markdown extension are returned, sorted
+     * by name so repeated runs process the same folder deterministically.
+     * Archived in-place files (post.md.done / post.md.failed) do not match
+     * the glob and are therefore never picked up again.
+     *
      * @return array List of absolute file paths
      */
     public function scan() {
         if (!is_dir($this->importDir)) {
+            publisharticle_log('debug', __METHOD__ . ': import dir missing or not a directory', array('dir' => $this->importDir));
             return [];
         }
 
@@ -362,6 +413,7 @@ class ArticleImporter {
             }
         }
         sort($files);
+        publisharticle_log('debug', __METHOD__ . ': scan found candidates', array('count' => count($files)));
         return $files;
     }
 
@@ -376,6 +428,15 @@ class ArticleImporter {
      * - moves the file to done/ or failed/ subfolder (future-dated articles
      *   are left in place and re-scanned until their publish time)
      *
+     * Edge cases:
+     * - when the file cannot be archived to done/failed, it is renamed
+     *   in-place with a ".done"/".failed" suffix (see archiveSource());
+     * - scheduled articles keep their source in the import folder and their
+     *   sibling images are moved to done/ so they are not re-imported.
+     *
+     * FlatPressAPI: delegates the actual publish to
+     * ArticleProcessor::process() (parse + compose + write + index update).
+     *
      * @param string $file Absolute path to the Markdown file
      * @return array ['success' => bool, 'id' => string|false, 'message' => string, 'images' => array]
      */
@@ -388,6 +449,8 @@ class ArticleImporter {
             'message' => '',
             'images' => [],
         ];
+
+        publisharticle_log('info', __METHOD__ . ': importing ' . $base);
 
         if (!is_file($file)) {
             $result['message'] = 'File not found.';
@@ -446,6 +509,9 @@ class ArticleImporter {
             // Future-dated article: leave the source file in the import folder
             // (it is re-scanned until its time has come). The images are
             // already imported, move their sources out of the way.
+            publisharticle_log('info', __METHOD__ . ': ' . $base . ' scheduled for '
+                . date('Y-m-d H:i:s', $res['scheduled']));
+            publisharticle_log('debug', __METHOD__ . ': scheduled file left in import folder for re-scan', array('file' => $base));
             $this->moveSourceImages($this->doneSubdir);
             if (!$this->markPending($file, $result['message'])) {
                 $result['warning'] = 'Cannot keep the scheduled file in the import folder.';
@@ -456,6 +522,7 @@ class ArticleImporter {
         if (!$this->archiveSource($file, $this->doneSubdir, $result['message'])) {
             $result['warning'] = 'Cannot move file out of the import folder.';
         }
+        publisharticle_log('info', __METHOD__ . ': ' . $base . ' published', array('id' => $res['id']));
         return $result;
     }
 
@@ -477,7 +544,7 @@ class ArticleImporter {
         if ($this->moveTo($file, $subdir, $note)) {
             return true;
         }
-        error_log(__METHOD__ . ': moveTo() failed for ' . $file
+        publisharticle_log('warn', __METHOD__ . ': moveTo() failed for ' . $file
             . '; archiving in place instead');
         return $this->archiveInPlace($file, $subdir, $note);
     }
@@ -514,7 +581,7 @@ class ArticleImporter {
             $marker .= '.' . time();
         }
         if (!@rename($file, $marker)) {
-            error_log(__METHOD__ . ': cannot archive ' . $file . ' in place ('
+            publisharticle_log('error', __METHOD__ . ': cannot archive ' . $file . ' in place ('
                 . $marker . ') — import dir not writable?');
             return false;
         }
@@ -527,11 +594,15 @@ class ArticleImporter {
     /**
      * Imports all Markdown files found in the import folder.
      *
+     * Logs a DEBUG summary of the candidates found by scan(); the per-file
+     * INFO lines are emitted by importFile().
+     *
      * @return array Results for each file: ['success', 'file', 'id', 'message', 'images']
      */
     public function importAll() {
         $results = [];
-        foreach ($this->scan() as $file) {
+        $files = $this->scan();
+        foreach ($files as $file) {
             $results[] = $this->importFile($file);
         }
         return $results;
@@ -665,7 +736,7 @@ class ArticleImporter {
     /**
      * Moves every source image of the import folder into a subfolder
      * (done/ or failed/), so imported images do not linger in the import
-     * folder. Best-effort: failures are logged, not fatal.
+     * folder. Best-effort: failures are logged at WARN level, not fatal.
      *
      * @param string $subdir done|failed
      */
@@ -678,7 +749,7 @@ class ArticleImporter {
         $destDir = rtrim($this->importDir, '/\\') . '/' . trim($subdir, '/\\');
         if (!is_dir($destDir)) {
             if (!mkdir($destDir, 0755, true)) {
-                error_log(__METHOD__ . ': cannot create ' . $destDir);
+                publisharticle_log('warn', __METHOD__ . ': cannot create ' . $destDir);
                 return;
             }
         }
@@ -692,7 +763,7 @@ class ArticleImporter {
                 if (@copy($src, $dest)) {
                     @unlink($src);
                 } else {
-                    error_log(__METHOD__ . ': cannot move image ' . $src . ' to ' . $dest);
+                    publisharticle_log('warn', __METHOD__ . ': cannot move image ' . $src . ' to ' . $dest);
                 }
             }
         }
@@ -754,6 +825,14 @@ class ArticleImporter {
      * Moves a processed file into a subfolder of the import directory.
      * Also moves associated sibling images and saves a .note file if given.
      *
+     * Edge cases:
+     * - a name collision in the target gets a UNIX-timestamp prefix;
+     * - a direct rename may fail on cross-device moves: a copy+unlink
+     *   fallback is used;
+     * - a complete failure is logged at WARN level (archiveSource() falls
+     *   back to in-place archival, so the article is still protected from
+     *   being published twice).
+     *
      * @param string $file Absolute path of the file to move
      * @param string $subdir done|failed
      * @param string $note Optional note/error description
@@ -763,7 +842,7 @@ class ArticleImporter {
         $targetDir = rtrim($this->importDir, '/\\') . '/' . trim($subdir, '/\\') . '/';
         if (!is_dir($targetDir)) {
             if (!mkdir($targetDir, 0755, true)) {
-                error_log(__METHOD__ . ': cannot create target dir: ' . $targetDir);
+                publisharticle_log('warn', __METHOD__ . ': cannot create target dir: ' . $targetDir);
                 return false;
             }
         }
@@ -785,7 +864,7 @@ class ArticleImporter {
         }
 
         if (!$success) {
-            error_log(__METHOD__ . ': failed to move ' . $file . ' to ' . $target
+            publisharticle_log('warn', __METHOD__ . ': failed to move ' . $file . ' to ' . $target
                 . ' — ' . (error_get_last() ? error_get_last()['message'] : 'unknown reason')
                 . ' — check that both ' . dirname($file) . ' and ' . $targetDir . ' are writable');
             return false;

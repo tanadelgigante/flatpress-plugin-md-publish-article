@@ -1,5 +1,7 @@
 <?php
 
+require_once 'PublishArticleLogger.php';
+
 /**
  * ImageUploader — gestione upload delle immagini degli articoli.
  *
@@ -11,6 +13,27 @@
  * La cartella delle immagini in FlatPress è definita dalla costante
  * IMAGES_DIR. Se non disponibile, si usa il percorso relativo
  * fp-content/images/.
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API: IMAGES_DIR constant only; no other global calls, which keeps
+ * this class unit-testable without a running FlatPress instance.
+ *
+ * Edge cases:
+ * - upload() checks early failures (mkdir of IMAGES_DIR, move_uploaded_file);
+ * - importLocal()/importLocalKeepName() fall back to plain copy() and verify
+ *   the destination directory first;
+ * - the folder importer treats an identical name already imported as a FAILURE
+ *   only when the content differs (ArticleImporter::sameContent() decides);
+ * - filenames are sanitized by using whitelisted extensions only.
+ *
+ * Logging (PublishArticleLogger, Task 5.2):
+ *   - ERROR: filesystem failures (images dir creation, move/copy failures);
+ *   - WARN : "name already in use" in importLocalKeepName() (folder importer
+ *            surfaces it as an article-level error);
+ *   - DEBUG: failed validation attempts (no upload performed).
+ * ---------------------------------------------------------------------------
  */
 class ImageUploader {
 
@@ -40,6 +63,7 @@ class ImageUploader {
      */
     public function validate($file) {
         if (!is_array($file) || !isset($file['error'])) {
+            publisharticle_log('debug', __METHOD__ . ': invalid file data (missing error key)');
             return 'Invalid file data.';
         }
 
@@ -53,15 +77,19 @@ class ImageUploader {
                 UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
                 UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.',
             ];
-            return isset($errors[$file['error']]) ? $errors[$file['error']] : 'Unknown upload error.';
+            $msg = isset($errors[$file['error']]) ? $errors[$file['error']] : 'Unknown upload error.';
+            publisharticle_log('debug', __METHOD__ . ': upload rejected', ['reason' => $msg, 'file' => isset($file['name']) ? $file['name'] : '']);
+            return $msg;
         }
 
         if ($file['size'] > $this->maxSize) {
+            publisharticle_log('debug', __METHOD__ . ': file too large', ['name' => $file['name'], 'size' => $file['size']]);
             return 'File too large (max ' . round($this->maxSize / 1048576, 1) . ' MB).';
         }
 
         $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
         if (!in_array($ext, $this->allowedExtensions)) {
+            publisharticle_log('debug', __METHOD__ . ': extension not allowed', ['ext' => $ext, 'file' => $file['name']]);
             return 'Extension "' . $ext . '" not allowed. Allowed: ' . implode(', ', $this->allowedExtensions) . '.';
         }
 
@@ -85,6 +113,7 @@ class ImageUploader {
         $dir = $this->getImagesDir();
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create images dir', ['dir' => $dir]);
                 return false;
             }
         }
@@ -96,6 +125,7 @@ class ImageUploader {
         $dest = $dir . '/' . $name;
 
         if (!move_uploaded_file($file['tmp_name'], $dest)) {
+            publisharticle_log('error', __METHOD__ . ': move_uploaded_file failed', ['name' => $file['name'], 'dest' => $dest]);
             return false;
         }
 
@@ -125,6 +155,7 @@ class ImageUploader {
         $dir = $this->getImagesDir();
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create images dir', ['dir' => $dir]);
                 return false;
             }
         }
@@ -135,6 +166,7 @@ class ImageUploader {
         $dest = $dir . '/' . $name;
 
         if (!copy($sourcePath, $dest)) {
+            publisharticle_log('error', __METHOD__ . ': copy failed', ['src' => $sourcePath, 'dest' => $dest]);
             return false;
         }
 
@@ -164,16 +196,19 @@ class ImageUploader {
         $dir = $this->getImagesDir();
         if (!is_dir($dir)) {
             if (!mkdir($dir, 0755, true)) {
+                publisharticle_log('error', __METHOD__ . ': cannot create images dir', ['dir' => $dir]);
                 return ['ok' => false, 'rel' => '', 'reason' => 'images dir not creatable'];
             }
         }
 
         $dest = $dir . '/' . $name;
         if (file_exists($dest)) {
+            publisharticle_log('warn', __METHOD__ . ': image name already in use', ['name' => $name]);
             return ['ok' => false, 'rel' => '', 'reason' => 'name already in use'];
         }
 
         if (!copy($sourcePath, $dest)) {
+            publisharticle_log('error', __METHOD__ . ': copy failed', ['src' => $sourcePath, 'dest' => $dest]);
             return ['ok' => false, 'rel' => '', 'reason' => 'copy failed'];
         }
 

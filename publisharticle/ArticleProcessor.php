@@ -5,6 +5,7 @@ require_once 'ArticleComposer.php';
 require_once 'ArticleWriter.php';
 require_once 'CategoryResolver.php';
 require_once 'ImageUploader.php';
+require_once 'PublishArticleLogger.php';
 
 /**
  * ArticleProcessor — ORCHESTRATORE.
@@ -15,6 +16,29 @@ require_once 'ImageUploader.php';
  * 3. ImageUploader    -> salva le immagini caricate in fp-content/images/
  * 4. ArticleComposer  -> compone l'entry FlatPress (stringa serializzata)
  * 5. ArticleWriter    -> salva sul filesystem (file .txt + view_counter.txt)
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress APIs used transitively (via the components):
+ *   - ArticleWriter::saveEntry()  -> entry_dir(), entry_init(),
+ *     entry_index::add(), do_action('publish_post', ...)
+ *   - ArticleComposer::buildEntry() -> system_ver() for the entry VERSION tag
+ *   - ImageUploader -> IMAGES_DIR
+ *
+ * This class is deliberately free of FlatPress global calls: everything goes
+ * through the injected components, which makes the processor unit-testable
+ * (tests/ArticleProcessorSchedulingTest.php) and keeps the public flows
+ * (import from folder, admin panel upload, scheduled promotion) identical.
+ *
+ * Logging (PublishArticleLogger, Task 5.2):
+ *   - INFO  : entry/exit of process() and scheduled promotions;
+ *   - DEBUG : parsed frontmatter details, scheduling decisions, resolved
+ *             categories;
+ *   - ERROR : failures writing the entry or the pending file.
+ * No log line alters the entry_index flow: index updates are performed by
+ * ArticleWriter::updateIndex() and are intentionally NOT logged here.
+ * ---------------------------------------------------------------------------
  */
 class ArticleProcessor {
 
@@ -33,6 +57,10 @@ class ArticleProcessor {
     /** @var ImageUploader */
     private $imageUploader;
 
+    /**
+     * Constructor: wires the orchestrator components together.
+     * FlatPressAPI: none directly; components resolved in their own files.
+     */
     public function __construct() {
         $this->parser = new ArticleParser();
         $this->composer = new ArticleComposer();
@@ -49,6 +77,15 @@ class ArticleProcessor {
      * body may reference them with plain filenames (e.g. ![alt](photo.jpg)),
      * which are normalized to images/... paths during conversion.
      *
+     * Edge cases:
+     * - frontmatter 'version:' overrides the dynamic default (system_ver());
+     *   legacy entries written by old plugin versions keep 'fp-1.4.1';
+     * - a future-dated article is either written to the pending directory or
+     *   deferred to the caller ($deferScheduling, used by the folder importer
+     *   so the source file can be re-scanned when due);
+     * - the entry ID may be deduplicated (+1 second) by ArticleWriter when the
+     *   same second was already used.
+     *
      * @param string $rawMarkdown Full markdown text with frontmatter
      * @param array $files Optional $_FILES array (name => file array)
      * @param string $imagesPrefix Prefix for uploaded files (e.g. entry ID)
@@ -62,12 +99,25 @@ class ArticleProcessor {
      *                     false on failure
      */
     public function process($rawMarkdown, $files = [], $imagesPrefix = '', $deferScheduling = false) {
+        publisharticle_log('info', __METHOD__ . ': processing article', [
+            'prefix' => $imagesPrefix !== '' ? $imagesPrefix : '(entry-id)',
+            'defer' => $deferScheduling ? 'yes' : 'no',
+        ]);
+
         $parsed = $this->parser->parseMarkdown($rawMarkdown);
         $properties = $parsed['properties'];
         $content = $parsed['content'];
 
+        publisharticle_log('debug', __METHOD__ . ': parsed frontmatter', [
+            'subject' => isset($properties['subject']) ? $properties['subject'] : (isset($properties['title']) ? $properties['title'] : ''),
+            'has_date' => isset($properties['date']) ? 'yes' : 'no',
+        ]);
+
         // Check for a future scheduled publish date
         $scheduleTs = $this->composer->extractScheduleDate($properties, time());
+        if ($scheduleTs !== null) {
+            publisharticle_log('debug', __METHOD__ . ': scheduled date detected', ['ts' => $scheduleTs]);
+        }
 
         // Resolve the ENTRY date (used for the entry ID and shown as publication date)
         $timestamp = isset($properties['date'])
@@ -77,6 +127,7 @@ class ArticleProcessor {
         // Translate category NAMES to numeric IDs (deferred if not resolvable)
         if (isset($properties['categories']) && $properties['categories'] !== '') {
             $properties['categories'] = $this->categoryResolver->resolve($properties['categories']);
+            publisharticle_log('debug', __METHOD__ . ': categories resolved', ['value' => $properties['categories']]);
         }
 
         $entry = $this->composer->buildEntry($properties, $content, $timestamp);
@@ -101,10 +152,16 @@ class ArticleProcessor {
             if ($deferScheduling) {
                 // The caller keeps the source file and re-imports it when due;
                 // do NOT write a pending entry (would cause a duplicate).
+                publisharticle_log('info', __METHOD__ . ': scheduled publication deferred to caller', ['id' => $id]);
                 return ['id' => $id, 'scheduled' => $scheduleTs, 'images' => $uploaded];
             }
             // Store in the pending directory
             $ok = $this->writer->savePendingEntry($id, $scheduleTs, $serialized);
+            if ($ok) {
+                publisharticle_log('info', __METHOD__ . ': scheduled entry written to pending', ['id' => $id, 'ts' => $scheduleTs]);
+            } else {
+                publisharticle_log('error', __METHOD__ . ': failed to write pending entry', ['id' => $id, 'ts' => $scheduleTs]);
+            }
             return $ok
                 ? ['id' => $id, 'scheduled' => $scheduleTs, 'images' => $uploaded]
                 : false;
@@ -114,8 +171,10 @@ class ArticleProcessor {
         // saveEntry() may deduplicate the ID if the same second was already used
         $finalId = $this->writer->saveEntry($id, $serialized);
         if ($finalId === false) {
+            publisharticle_log('error', __METHOD__ . ': failed to save entry', ['id' => $id]);
             return false;
         }
+        publisharticle_log('info', __METHOD__ . ': entry published', ['id' => $finalId]);
         return ['id' => $finalId, 'scheduled' => false, 'images' => $uploaded];
     }
 
@@ -134,10 +193,15 @@ class ArticleProcessor {
         }
 
         $promoted = [];
-        foreach ($this->writer->listPendingEntries() as $pending) {
-            if ($pending['scheduled'] <= $now) {
-                if ($this->writer->promotePendingEntry($pending)) {
-                    $promoted[] = $pending['id'];
+        $pending = $this->writer->listPendingEntries();
+        publisharticle_log('debug', __METHOD__ . ': checking pending entries', ['count' => count($pending)]);
+        foreach ($pending as $p) {
+            if ($p['scheduled'] <= $now) {
+                if ($this->writer->promotePendingEntry($p)) {
+                    $promoted[] = $p['id'];
+                    publisharticle_log('info', __METHOD__ . ': promoted pending entry', ['id' => $p['id']]);
+                } else {
+                    publisharticle_log('error', __METHOD__ . ': failed to promote pending entry', ['id' => $p['id']]);
                 }
             }
         }

@@ -9,6 +9,27 @@ require_once 'ArticleParser.php';
  * - generazione dell'ID entry (entryYYMMDD-HHMMSS)
  * - costruzione della stringa serializzata KEY|value|
  * - conversione Markdown -> BBCode
+ *
+ * ---------------------------------------------------------------------------
+ * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
+ *
+ * FlatPress API: system_ver() only, used to write the dynamic VERSION tag of
+ * each entry (fp-1.4.1 on 1.4.x, fp-1.5.1 on 1.5.x). When the runtime is not
+ * available (unit tests, standalone importer) FALLBACK_VERSION is used.
+ *
+ * Edge cases / legacy behaviour:
+ * - entries written by very old plugin versions may carry a hard-coded
+ *   'version:' frontmatter key equal to 'fp-1.4.1'; it is honoured as-is so
+ *   the existing archives keep the version they were written with;
+ * - a missing 'version:' key switches to the dynamic default described above;
+ * - the Markdown->BBCode conversion honours FlatPress blocks ([code], [hr],
+ *   [img], quotes, lists) and leaves unknown/plain HTML untouched.
+ *
+ * This class is deliberately free of FlatPress global calls (except the
+ * guarded system_ver()) and performs no logging: composition is pure string
+ * manipulation and never fails on its own (failures are reported by
+ * ArticleWriter when the filesystem write happens).
+ * ---------------------------------------------------------------------------
  */
 class ArticleComposer {
 
