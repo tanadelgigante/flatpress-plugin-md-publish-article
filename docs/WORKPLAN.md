@@ -251,15 +251,18 @@ Nota: la matrice si verifica sull'istanza Gitea (UI + API), non solo localmente.
 **Deliverable:** codice commentato; logger + 14 test; wiki Gitea (8 pagine); README aggiornato.
 **Criteri di accettazione:** ✅ R18–R20 soddisfatti; `php -l` pulito su 15 file; **suite PHPUnit verde: 114 test / 306 assertion, exit 0** (1 skip invariato), verificata sul mirror ext4 `/home/alessio/pa-test`; wiki accessibile via API.
 
-### FASE 6 — Release v1.0.0 (C, con approvazione utente)
-**Flusso (Opzione B + VERSION dinamico, coerentemente con le decisioni approvate):**
-1. Preparare il commit di release: version.ini `1.0.0` (senza `-SNAPSHOT`); subject es. `Release v1.0.0` (**senza** `[skip-ci]`, così lint/test/release girano e il tag viene validato).
-2. Tag `v1.0.0` e push del tag → CI esegue `lint`+`test`+`release`; release pubblicata su Gitea con asset zip.
-3. Il job `release` fa il bump a `1.0.1-SNAPSHOT` col commit che **contiene `[skip-ci]` aggiunto automaticamente** dal passo "Bump version to next SNAPSHOT" → il push sul default branch non ri-triggera il workflow (R13).
-4. Verifica finale: nessuna run CI superflua; entry di esempio marcata `fp-1.5.1` su FlatPress 1.5.1 e lettura corretta anche su 1.4.1 (retrocompatibilità).
+### FASE 6 — Release (release v1.0.0 GIÀ PUBBLICATA dall'utente; prossima v1.0.1 con logging) — IN CORSO
+**Stato (aggiornato 2026-09-20):** l'utente ha pubblicato manualmente la **release v1.0.0** (workflow_dispatch `job=release`) dal commit `28fe878`, prima che la Fase 5 fosse su `origin/main`. Il tag `v1.0.0` → `28fe878`, asset `publisharticle-v1.0.0.zip` presente; il bump automatico `4636aed Bump version to 1.0.1-SNAPSHOT after release main [skip-ci]` conferma lo **scenario 2** della matrice (push con `[skip-ci]` → nessuna run CI superflua). **Decisione utente: v1.0.0 = prima release pubblicata; la Fase 5 (logger/commenti/README/wiki) sarà rilasciata come v1.0.1.** Il tag `v1.0.0` NON sarà spostato; il codice Fase 5 è su `main` (`179a698`) sulla soglia `1.0.1-SNAPSHOT`.
 
-**Deliverable:** tag `v1.0.0`, release su Gitea, `version.ini` = `1.0.1-SNAPSHOT`.
-**Criteri di accettazione:** release pubblicata; ultimo push (bump con `[skip-ci]`) non produce lavoro CI; Fase 4 matrice scenario 4-6 confermato in produzione.
+**Flusso per la release v1.0.1 (da eseguire con approvazione/azione manuale utente, come per v1.0.0):**
+1. `main` è già sulla soglia `1.0.1-SNAPSHOT` e contiene la Fase 5. L'utente lancia `workflow_dispatch job=package` (genera pacchetto da `main`) ed eventualmente il testbed; poi `workflow_dispatch job=release` con `package_run_id` (come fatto per v1.0.0).
+2. Il job `release` legge `version.ini` → `v1.0.1`, crea la release Gitea con l'asset zip, e fa il bump automatico a `1.0.2-SNAPSHOT` con commit contenente `[skip-ci]` → nessuna run CI superflua sul push di bump (R13).
+3. Il tag `v1.0.1` viene creato dalla release (o dal tag push, a scelta utente); se invece l'utente preferisce il flusso tag: commit di release `Release v1.0.1` (**senza** `[skip-ci]`) + tag + push del tag → CI esegue lint+test+release.
+4. Verifica finale: nessuna run CI superflua dopo il bump; entry di esempio marcata `fp-1.5.1` su FlatPress 1.5.1 e lettura corretta anche su 1.4.1 (retrocompatibilità).
+
+**Deliverable (rilasciato per v1.0.0):** tag `v1.0.0` (→ `28fe878`), release su Gitea con `publisharticle-v1.0.0.zip`, `version.ini` portato a `1.0.1-SNAPSHOT` dal bump automatico (`4636aed`).
+**Deliverable (prossimo, v1.0.1):** release `v1.0.1` (codice Fase 5), `version.ini` → `1.0.2-SNAPSHOT`.
+**Criteri di accettazione:** release v1.0.0 pubblicata ✓; ultimo push di bump (v1.0.0) con `[skip-ci]` non ha prodotto lavoro CI ✓ (scenario 2 matrice confermato in produzione); per v1.0.1: release pubblicata e bump con `[skip-ci]` senza work CI superfluo.
 
 ---
 
