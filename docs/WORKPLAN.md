@@ -191,7 +191,7 @@
 
 **Deliverable:** `ci.yml` aggiornato (commit `6b6f995`). Matrice da compilare con esiti reali.
 **Criteri di accettazione:** ⏳ *in sospeso* — la verifica della matrice procede **via dispatch manuale da parte dell'utente** (decisione utente del 2026-09-19): l'utente pusha tutto, poi lancia manualmente `workflow_dispatch job=package` (generazione pacchetto), l'avvio del container testbed, e alla fine se tutto è a posto la release (`job=release`). Copertura matrice:
-- Scenario 1 (push normale su main): verificato dal push di `main` (lint+test eseguiti sulla run reale del push);
+- Scenario 1 (push normale su main): verificato dal push di main avvenuto il 2026-09-19 su `origin` (top commit `673fa96`, 10+1 commit, `origin/main` in sync) — lint+test eseguiti sulla run reale del push;
 - Scenario 2 (`[skip-ci]` su push): verificato dal commit di bump post-release (automatico, contiene il token) o da un commit di prova con token se l'utente volesse testarlo;
 - Scenario 6 (workflow_dispatch): verificato dalle azioni manuali dell'utente (package/testbed/release);
 - Scenari 4-5 (push di tag): la release avviene via `workflow_dispatch job=release` (non via tag push) → l'hit `startsWith(refs/tags/v)` non è esercitato da questa release; darne atto a fine Fase 6;
