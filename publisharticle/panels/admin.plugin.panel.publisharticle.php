@@ -172,6 +172,16 @@ if (class_exists('AdminPanelAction')) {
 			$publishNow = isset($_POST['publish_now']) && $_POST['publish_now'] === 'on';
 			$isDraft    = isset($_POST['publisharticle-draft']);
 
+			$uploadErrorMessages = array(
+				UPLOAD_ERR_INI_SIZE => 'File exceeds upload_max_filesize.',
+				UPLOAD_ERR_FORM_SIZE => 'File exceeds form MAX_FILE_SIZE.',
+				UPLOAD_ERR_PARTIAL => 'File was only partially uploaded.',
+				UPLOAD_ERR_NO_FILE => 'No file was uploaded.',
+				UPLOAD_ERR_NO_TMP_DIR => 'Missing a temporary folder.',
+				UPLOAD_ERR_CANT_WRITE => 'Failed to write file to disk.',
+				UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.',
+			);
+
 			if (!$isDraft && !$publishNow && $scheduleTs !== null) {
 				$options = plugin_getoptions('publisharticle');
 				if (!is_array($options)) {
@@ -224,6 +234,21 @@ if (class_exists('AdminPanelAction')) {
 								}
 							}
 							@chmod($destImg, 0644);
+						} else {
+							$uploadError = $_FILES['images']['error'][$i];
+							publisharticle_log(
+								'warn',
+								__METHOD__ . ': image upload rejected by PHP',
+								array(
+									'index' => $i,
+									'error' => $uploadError,
+									'name' => $_FILES['images']['name'][$i],
+									'size' => $_FILES['images']['size'][$i],
+									'reason' => isset($uploadErrorMessages[$uploadError])
+										? $uploadErrorMessages[$uploadError]
+										: 'Unknown upload error.',
+								)
+							);
 						}
 					}
 				}
@@ -267,6 +292,20 @@ if (class_exists('AdminPanelAction')) {
 						$_FILES['images']['error'][$i]
 						!== UPLOAD_ERR_OK
 					) {
+						$uploadError = $_FILES['images']['error'][$i];
+						publisharticle_log(
+							'warn',
+							__METHOD__ . ': image upload rejected by PHP',
+							array(
+								'index' => $i,
+								'error' => $uploadError,
+								'name' => $_FILES['images']['name'][$i],
+								'size' => $_FILES['images']['size'][$i],
+								'reason' => isset($uploadErrorMessages[$uploadError])
+									? $uploadErrorMessages[$uploadError]
+									: 'Unknown upload error.',
+							)
+						);
 						continue;
 					}
 
@@ -310,6 +349,24 @@ if (class_exists('AdminPanelAction')) {
 						}
 					}
 				}
+			} else {
+				$images = isset($_FILES['images']) ? $_FILES['images'] : null;
+				$imageNames = is_array($images) && isset($images['name']) ? $images['name'] : null;
+				$imageErrors = is_array($images) && isset($images['error']) ? $images['error'] : null;
+				$imageSizes = is_array($images) && isset($images['size']) ? $images['size'] : null;
+				publisharticle_log(
+					'debug',
+					__METHOD__ . ': images field empty/absent',
+					array(
+						'field_present' => isset($_FILES['images']),
+						'field_type' => gettype($images),
+						'field_keys' => is_array($images) ? array_keys($images) : array(),
+						'name_count' => is_array($imageNames) ? count($imageNames) : 0,
+						'first_name' => is_array($imageNames) && isset($imageNames[0]) ? $imageNames[0] : null,
+						'first_error' => is_array($imageErrors) && isset($imageErrors[0]) ? $imageErrors[0] : null,
+						'first_size' => is_array($imageSizes) && isset($imageSizes[0]) ? $imageSizes[0] : null,
+					)
+				);
 			}
 
 			// ── Fix Markdown image references ──
