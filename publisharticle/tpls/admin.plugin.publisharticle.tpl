@@ -9,6 +9,17 @@
 	</div>
 {/if}
 
+{if isset($image_errors) && count($image_errors) > 0}
+	<div class="notice error">
+		<p><strong>{$plang.images_rejected_title}</strong></p>
+		<ul>
+			{foreach $image_errors as $imgErr}
+				<li>{$imgErr|escape}</li>
+			{/foreach}
+		</ul>
+	</div>
+{/if}
+
 {html_form enctype="multipart/form-data" class="option-set"}
 <dl class="option-list">
 

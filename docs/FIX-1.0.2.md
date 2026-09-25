@@ -1,9 +1,10 @@
-# Fix Release v1.0.3 — Upload immagine dal pannello di pubblicazione diretta
+# Fix Release v1.0.2 — Upload immagine dal pannello di pubblicazione diretta
 
 | Campo | Valore |
 | --- | --- |
+| **Release** | v1.0.2 |
 | **Data** | 2026-09-25 |
-| **Stato** | Release pianificata; fix pronta, in attesa di release. |
+| **Stato** | Pacchetto in preparazione; fix pronta, in attesa di release. |
 | **Riferimento WORKPLAN** | [`docs/WORKPLAN.md`](WORKPLAN.md), non aggiornato di proposito; vedi [Nota finale](#nota-finale). |
 
 ## Sintomo
@@ -40,6 +41,17 @@ In `publisharticle/panels/admin.plugin.panel.publisharticle.php`, il ramo publis
 - il pannello tenta `copy()` e, se il fallback riesce, rimuove il file temporaneo con `@unlink`, mantenendo comunque registrata l'immagine;
 - in caso di fallimento totale, registra l'evento con `publisharticle_log('warn', ...)`.
 
+### Feedback visivo degli upload rifiutati
+
+Quando PHP rifiuta un file immagine, per esempio perché supera `upload_max_filesize` (nel testbed il limite è `2M`), il pannello mostra un blocco `notice error` con l'elenco delle immagini non caricate. Ogni voce riporta:
+
+- l'indice del file;
+- il nome del file;
+- il motivo del rifiuto, per esempio `File exceeds upload_max_filesize.`;
+- per `UPLOAD_ERR_INI_SIZE` e `UPLOAD_ERR_FORM_SIZE`, anche il valore configurato per `upload_max_filesize`.
+
+I messaggi sono localizzati in inglese (EN) e italiano (IT). Il rifiuto non blocca la pubblicazione: l'articolo viene comunque pubblicato e l'errore viene soltanto segnalato all'utente.
+
 ## Verifica
 
 | Controllo | Esito |
@@ -63,13 +75,16 @@ Il comportamento è identico su FlatPress 1.4.x e 1.5.x, che definiscono entramb
 
 ## File coinvolti
 
-| Stato | File |
-| --- | --- |
-| Modificato | `publisharticle/ImageUploader.php` |
-| Modificato | `publisharticle/panels/admin.plugin.panel.publisharticle.php` |
-| Nuovo | `tests/ImageUploaderTest.php` |
-| Non toccato | `version.ini` |
-| Non toccato | `docs/WORKPLAN.md` |
+| Stato | File | Descrizione |
+| --- | --- | --- |
+| Modificato | `publisharticle/ImageUploader.php` | Risoluzione unificata e robusta del percorso della cartella immagini. |
+| Modificato | `publisharticle/panels/admin.plugin.panel.publisharticle.php` | Risoluzione del percorso e raccolta degli errori di upload per il feedback nel pannello. |
+| Modificato | `publisharticle/tpls/admin.plugin.publisharticle.tpl` | Rendering del blocco `notice error` con l'elenco delle immagini rifiutate. |
+| Modificato | `publisharticle/lang/lang.en-us.php` | Localizzazione inglese del titolo e del formato dei messaggi di feedback. |
+| Modificato | `publisharticle/lang/lang.it-it.php` | Localizzazione italiana del titolo e del formato dei messaggi di feedback. |
+| Nuovo | `tests/ImageUploaderTest.php` | Test della risoluzione del percorso della cartella immagini. |
+| Modificato | `version.ini` | `1.0.2-SNAPSHOT` |
+| Non toccato | `docs/WORKPLAN.md` | Mantenuto invariato come da richiesta. |
 
 ## Nota finale
 

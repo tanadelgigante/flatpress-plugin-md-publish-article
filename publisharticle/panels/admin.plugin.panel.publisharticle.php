@@ -182,6 +182,16 @@ if (class_exists('AdminPanelAction')) {
 				UPLOAD_ERR_EXTENSION => 'A PHP extension stopped the file upload.',
 			);
 
+			$uiImageErrors = array();
+
+			/*
+			 * AdminPanelAction has no language property. The panel language is
+			 * normally exposed to Smarty as $plang, but POST handling happens
+			 * before that assignment; load it through FlatPress for the PHP-side
+			 * messages below.
+			 */
+			$lang = lang_load($this->langres);
+
 			if (!$isDraft && !$publishNow && $scheduleTs !== null) {
 				$options = plugin_getoptions('publisharticle');
 				if (!is_array($options)) {
@@ -249,10 +259,34 @@ if (class_exists('AdminPanelAction')) {
 										: 'Unknown upload error.',
 								)
 							);
+
+							$reason = isset($uploadErrorMessages[$uploadError])
+								? $uploadErrorMessages[$uploadError]
+								: 'Unknown upload error.';
+							if (
+								$uploadError === UPLOAD_ERR_INI_SIZE ||
+								$uploadError === UPLOAD_ERR_FORM_SIZE
+							) {
+								$uiImageErrors[] = sprintf(
+									$lang['admin']['plugin']['publisharticle']['image_rejected_limit'],
+									$i+1,
+									$_FILES['images']['name'][$i],
+									$reason,
+									ini_get('upload_max_filesize')
+								);
+							} else {
+								$uiImageErrors[] = sprintf(
+									$lang['admin']['plugin']['publisharticle']['image_rejected'],
+									$i+1,
+									$_FILES['images']['name'][$i],
+									$reason
+								);
+							}
 						}
 					}
 				}
 
+				$this->smarty->assign('image_errors', $uiImageErrors);
 				$this->smarty->assign('success', 1);
 				return;
 			}
@@ -306,6 +340,29 @@ if (class_exists('AdminPanelAction')) {
 									: 'Unknown upload error.',
 							)
 						);
+
+						$reason = isset($uploadErrorMessages[$uploadError])
+							? $uploadErrorMessages[$uploadError]
+							: 'Unknown upload error.';
+						if (
+							$uploadError === UPLOAD_ERR_INI_SIZE ||
+							$uploadError === UPLOAD_ERR_FORM_SIZE
+						) {
+							$uiImageErrors[] = sprintf(
+								$lang['admin']['plugin']['publisharticle']['image_rejected_limit'],
+								$i+1,
+								$_FILES['images']['name'][$i],
+								$reason,
+								ini_get('upload_max_filesize')
+							);
+						} else {
+							$uiImageErrors[] = sprintf(
+								$lang['admin']['plugin']['publisharticle']['image_rejected'],
+								$i+1,
+								$_FILES['images']['name'][$i],
+								$reason
+							);
+						}
 						continue;
 					}
 
@@ -368,6 +425,8 @@ if (class_exists('AdminPanelAction')) {
 					)
 				);
 			}
+
+			$this->smarty->assign('image_errors', $uiImageErrors);
 
 			// ── Fix Markdown image references ──
 			// (plugin.png) → (images/plugin.png)
