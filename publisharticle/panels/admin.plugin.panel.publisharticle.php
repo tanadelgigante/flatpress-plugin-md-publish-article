@@ -25,7 +25,12 @@
  *     clients that do not post images[] as an array);
  *   - future-dated articles (not "publish now", not a draft) are saved into
  *     the import folder so the cron importer picks them up when due;
- *   - image file names are sanitized with [^a-zA-Z0-9_.\-] -> '_' before use.
+ *   - image file names are sanitized with [^a-zA-Z0-9_.\-] -> '_' before use;
+ *   - the images dir comes from ImageUploader::getImagesDir(), which prefixes
+ *     the absolute ABS_PATH when available (R22 regression fix: IMAGES_DIR is
+ *     blog-root-relative on FlatPress 1.5.x / 1.4.x);
+ *   - a failed move_uploaded_file() falls back to copy() and, on total
+ *     failure, is reported at WARN level (R22: previously silent).
  *
  * Logging (PublishArticleLogger, Task 5.2): filesystem failures while saving
  * scheduled articles/images to the import folder are reported at WARN/ERROR
@@ -40,6 +45,8 @@ if (class_exists('AdminPanelAction')) {
 		. 'ArticleImporter.php';
 	require_once plugin_getdir('publisharticle')
 		. 'PublishArticleLogger.php';
+	require_once plugin_getdir('publisharticle')
+		. 'ImageUploader.php';
 
 	class admin_plugin_publisharticle extends AdminPanelAction {
 
@@ -238,7 +245,15 @@ if (class_exists('AdminPanelAction')) {
 				isset($_FILES['images']) &&
 				!empty($_FILES['images']['name'][0])
 			) {
-				$imgDir = defined('IMAGES_DIR') ? IMAGES_DIR : 'fp-content/images';
+				// REGRESSION FIX (R22): IMAGES_DIR is a blog-root-RELATIVE path
+				// on FlatPress (defaults.php: FP_CONTENT . 'images/'). The core
+				// always resolves it against the absolute ABS_PATH. Using the
+				// bare relative path works only when the PHP process CWD is the
+				// blog root; from the admin panel is_dir()/mkdir() and
+				// move_uploaded_file() target the wrong location. ImageUploader
+				// now prefixes ABS_PATH when available and still falls back to
+				// the legacy relative path on FlatPress 1.4.x / exotic setups.
+				$imgDir = (new ImageUploader())->getImagesDir();
 
 				if (!is_dir($imgDir)) {
 					mkdir($imgDir, 0755, true);
@@ -279,6 +294,20 @@ if (class_exists('AdminPanelAction')) {
 						)
 					) {
 						$imageMap[$rawName] = 'images/' . $safeName;
+					} else {
+						// REGRESSION FIX (R22): move_uploaded_file() can fail
+						// without any visible error when the destination does
+						// not live in the expected filesystem location (wrong
+						// CWD + relative IMAGES_DIR, read-only dir, ...). Fall
+						// back to a plain copy() and surface total failures in
+						// the log instead of losing the image silently.
+						if (copy($_FILES['images']['tmp_name'][$i], $dest)) {
+							@unlink($_FILES['images']['tmp_name'][$i]);
+							$imageMap[$rawName] = 'images/' . $safeName;
+						} else {
+							publisharticle_log('warn', __METHOD__ . ': cannot save image to images dir: '
+								. $dest . ' — ' . (error_get_last() ? error_get_last()['message'] : ''));
+						}
 					}
 				}
 			}

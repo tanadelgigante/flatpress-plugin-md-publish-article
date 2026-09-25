@@ -15,10 +15,22 @@ require_once 'PublishArticleLogger.php';
  * fp-content/images/.
  *
  * ---------------------------------------------------------------------------
+ * REGRESSION FIX (R22): IMAGES_DIR is a blog-root-RELATIVE path in FlatPress
+ * (defaults.php: FP_CONTENT . 'images/'), while core always resolves it
+ * against the absolute ABS_PATH constant (defaults.php: dirname(__FILE__) . '/')
+ * — see ABS_PATH . IMAGES_DIR everywhere in core. Using the bare relative
+ * path works only when the PHP process CWD equals the blog root; from the
+ * admin panel or a cron/folder-import context is_dir(), mkdir() and
+ * move_uploaded_file() can silently target the wrong location. getImagesDir()
+ * now prefixes ABS_PATH whenever it is defined and the configured IMAGES_DIR
+ * is relative. The legacy fallbacks are kept for runtimes without ABS_PATH
+ * (unit tests, exotic FlatPress 1.4.x configs).
+ *
+ * ---------------------------------------------------------------------------
  * MAINTENANCE NOTES (WORKPLAN Phase 5 / R18):
  *
- * FlatPress API: IMAGES_DIR constant only; no other global calls, which keeps
- * this class unit-testable without a running FlatPress instance.
+ * FlatPress API: IMAGES_DIR + ABS_PATH constants only; no other global calls,
+ * which keeps this class unit-testable without a running FlatPress instance.
  *
  * Edge cases:
  * - upload() checks early failures (mkdir of IMAGES_DIR, move_uploaded_file);
@@ -49,10 +61,63 @@ class ImageUploader {
      * @return string Path to images directory (with trailing slash removed)
      */
     public function getImagesDir() {
-        if (defined('IMAGES_DIR')) {
-            return rtrim(IMAGES_DIR, '/\\');
+        return $this->resolveImagesDir();
+    }
+
+    /**
+     * Resolves the FlatPress image directory to a filesystem path.
+     *
+     * FlatPress defines IMAGES_DIR as a blog-root-RELATIVE path
+     * (defaults.php: FP_CONTENT . 'images/') and exposes the absolute blog
+     * root in ABS_PATH (defaults.php: dirname(__FILE__) . '/', trailing
+     * slash included). This method prefixes ABS_PATH whenever it is available
+     * AND the configured IMAGES_DIR is relative, so the returned path is
+     * deterministic regardless of the process working directory (admin panel,
+     * cron promotion, folder importer).
+     *
+     * Backwards compatibility:
+     * - ABS_PATH missing (unit-test runtime, exotic FlatPress 1.4.x configs):
+     *   legacy behaviour, IMAGES_DIR is returned as-is (relative or absolute);
+     * - IMAGES_DIR missing: fallback to the relative fp-content/images/;
+     * - an already-absolute IMAGES_DIR is never double-prefixed;
+     * - the trailing slash is always removed (same contract as before).
+     *
+     * $imagesDir / $absPath overrides exist for unit-testability: they let
+     * callers probe the path construction without defining global constants.
+     *
+     * @param string|null $imagesDir Override IMAGES_DIR (default: the constant)
+     * @param string|null $absPath   Override ABS_PATH (default: the constant)
+     * @return string Path to images directory (trailing slash removed)
+     */
+    public function resolveImagesDir($imagesDir = null, $absPath = null) {
+        if ($imagesDir === null) {
+            $imagesDir = defined('IMAGES_DIR') ? IMAGES_DIR : 'fp-content/images';
         }
-        return 'fp-content/images';
+        if ($absPath === null && defined('ABS_PATH')) {
+            $absPath = ABS_PATH;
+        }
+        if ($absPath !== null && $absPath !== '' && !$this->isAbsolutePath($imagesDir)) {
+            return rtrim(rtrim($absPath, '/\\') . '/' . ltrim($imagesDir, '/\\'), '/\\');
+        }
+        return rtrim($imagesDir, '/\\');
+    }
+
+    /**
+     * Whether a filesystem path is absolute (POSIX /, Windows drive C:,
+     * Windows UNC \\server, and the backslash form).
+     *
+     * @param string $path
+     * @return bool
+     */
+    private function isAbsolutePath($path) {
+        if ($path === '' || $path === null) {
+            return false;
+        }
+        $first = $path[0];
+        if ($first === '/' || $first === '\\') {
+            return true;
+        }
+        return (bool) preg_match('#^[A-Za-z]:[\\\\/]#', $path);
     }
 
     /**
